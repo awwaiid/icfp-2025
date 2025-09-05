@@ -15,4 +15,4 @@ print("Usage: p = Problem(room_count=6)")
 
 if __name__ == "__main__":
     # Start IPython with the startup script
-    start_ipython(argv=[], user_ns={}, exec_lines=startup_script.strip().split('\n'))
+    start_ipython(argv=[], user_ns={}, exec_lines=startup_script.strip().split("\n"))
