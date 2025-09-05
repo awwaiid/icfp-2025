@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+
+import sys
+import requests
+import json
+
+if len(sys.argv) != 2:
+    print("Usage: select-problem <problem_name>")
+    sys.exit(1)
+
+p = sys.argv[1]
+
+print(f"Selecting problem {p}")
+
+data = {
+    "id": "awwaiid@thelackthereof.org zFPVkfKRKAgDUdmVr2Oi1A",
+    "problemName": p
+}
+
+response = requests.post(
+    "https://31pwr5t6ij.execute-api.eu-west-2.amazonaws.com/select",
+    headers={"Content-Type": "application/json"},
+    json=data
+)
+
+print(f"Status: {response.status_code}")
+print(response.text)
