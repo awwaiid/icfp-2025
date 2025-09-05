@@ -2,6 +2,7 @@ import json
 import subprocess
 import requests
 from room import Room
+from visualizer import TerminalVisualizer
 
 
 class Problem:
@@ -16,6 +17,7 @@ class Problem:
         self.room_sequence_map = {}  # maps (path_prefix, room_labels) to room instances
         self.user_id = user_id  # API user ID
         self.base_url = "https://31pwr5t6ij.execute-api.eu-west-2.amazonaws.com"
+        self.visualizer = TerminalVisualizer(self)  # Terminal visualization
 
     def add_observation(self, path, rooms):
         """
@@ -443,3 +445,21 @@ class Problem:
                     # We could implement cycle detection logic here
                     print(f"Cycle detected in path: {path} -> {rooms_sequence}")
                     # TODO: Implement cycle detection and room merging
+    
+    def print_state(self, view="summary"):
+        """Print current state using terminal visualizer"""
+        if view == "all":
+            self.visualizer.print_all()
+        elif view == "summary":
+            self.visualizer.print_room_summary()
+        elif view == "matrix":
+            self.visualizer.print_connection_matrix()
+        elif view == "doors":
+            self.visualizer.print_door_usage_summary()
+        elif view == "map":
+            self.visualizer.print_ascii_map()
+        elif view == "details":
+            self.visualizer.print_room_details()
+        else:
+            print(f"Unknown view: {view}")
+            print("Available views: summary, matrix, doors, map, details, all")
