@@ -1052,10 +1052,29 @@ class Problem:
                     to_connections = self.get_absolute_connections(to_room)
                     to_door = None
 
+                    # Find all potential reverse doors
+                    potential_to_doors = []
                     for potential_to_door, reverse_abs_id in enumerate(to_connections):
                         if reverse_abs_id == from_abs_id:
-                            to_door = potential_to_door
-                            break
+                            potential_to_doors.append(potential_to_door)
+                    
+                    # If we have multiple options, try to find one that hasn't been used yet
+                    if potential_to_doors:
+                        for potential_to_door in potential_to_doors:
+                            # Check if this bidirectional connection is already in our set
+                            test_connection_key = (
+                                min(from_index, to_index),
+                                max(from_index, to_index),
+                                min(from_door, potential_to_door),
+                                max(from_door, potential_to_door),
+                            )
+                            if test_connection_key not in connections_set:
+                                to_door = potential_to_door
+                                break
+                        
+                        # If all potential doors are already used, take the first one
+                        if to_door is None:
+                            to_door = potential_to_doors[0]
 
                     if to_door is not None:
                         # Create a unique key for this connection (bidirectional)
