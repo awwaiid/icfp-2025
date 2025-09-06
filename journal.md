@@ -13,3 +13,5 @@ Yesterday we got it working doing systematic exploration of rooms, and used that
 
 Today the ambiguity of the rooms has increased, but they gave us the ability to overwrite the labels with our own (still 0..3). So like you could change all the labels to 0 as you go, and then if you see a label-0 then you can be suspicious, or something.
 
+We need to think through two things -- one is how to reliably deal with this ambiguity in room labels. The second is how to game the score in a useful way. I still think this has GOT to be about having longer chains, as that is the main way we can explore without penalty.
+
