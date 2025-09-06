@@ -161,8 +161,31 @@ class RoomManager:
 
         return absolute_connections
 
+    def assign_initial_disambiguation_ids(self):
+        """Assign disambiguation ID 0 to unique complete rooms"""
+        complete_rooms = self.get_complete_rooms()
+        
+        # Group by base fingerprint
+        base_fingerprint_groups = {}
+        for room in complete_rooms:
+            base_fp = room.get_fingerprint(include_disambiguation=False)
+            if base_fp not in base_fingerprint_groups:
+                base_fingerprint_groups[base_fp] = []
+            base_fingerprint_groups[base_fp].append(room)
+        
+        # Assign ID 0 to rooms that are unique
+        for base_fp, rooms in base_fingerprint_groups.items():
+            if len(rooms) == 1:
+                room = rooms[0]
+                if not hasattr(room, 'disambiguation_id') or room.disambiguation_id is None:
+                    room.disambiguation_id = 0
+                    print(f"Assigned disambiguation ID 0 to unique room: {room.get_fingerprint()}")
+
     def remove_duplicate_rooms(self, api_client=None) -> int:
         """Remove duplicate rooms with identical complete fingerprints, using disambiguation when needed"""
+        # First, assign ID 0 to unique rooms
+        self.assign_initial_disambiguation_ids()
+        
         identical_groups = self.find_identical_fingerprints()
 
         if not identical_groups:
@@ -178,19 +201,25 @@ class RoomManager:
             print(f"Processing rooms with identical fingerprint '{fingerprint}':")
             
             if len(rooms) == 2 and api_client:
-                # Try disambiguation for pairs of rooms
+                # The first room (already exists) should have disambiguation_id = 0
+                # The second room (newly discovered) gets disambiguation_id = ? until verified
                 room_idx_a, room_a = rooms[0]
                 room_idx_b, room_b = rooms[1]
                 
-                print(f"  Disambiguating Room {room_idx_a} and Room {room_idx_b}...")
+                # Ensure first room has ID 0, second room has None (shows as ?)
+                if not hasattr(room_a, 'disambiguation_id') or room_a.disambiguation_id is None:
+                    room_a.disambiguation_id = 0
+                if hasattr(room_b, 'disambiguation_id') and room_b.disambiguation_id == 0:
+                    room_b.disambiguation_id = None  # Reset to ? until verified
+                
+                print(f"  Disambiguating Room {room_idx_a} (ID: {room_a.disambiguation_id}) and Room {room_idx_b} (ID: ?)")
                 
                 try:
                     are_different = self.disambiguate_rooms_with_path_navigation(room_a, room_b, api_client)
                     
                     if are_different:
-                        print(f"  ✅ Rooms confirmed DIFFERENT - assigning disambiguation IDs")
-                        room_a.disambiguation_id = 0
-                        room_b.disambiguation_id = 1
+                        print(f"  ✅ Rooms confirmed DIFFERENT - assigning disambiguation ID 1 to new room")
+                        room_b.disambiguation_id = 1  # Now it gets ID 1
                         continue  # Keep both rooms, don't merge
                     else:
                         print(f"  ❌ Rooms confirmed SAME - will merge")
@@ -206,6 +235,10 @@ class RoomManager:
 
             print(f"  Merging rooms:")
             print(f"    Keeping Room {keeper_idx}")
+
+            # Ensure keeper gets ID 0 if it doesn't have one
+            if not hasattr(keeper_room, 'disambiguation_id') or keeper_room.disambiguation_id is None:
+                keeper_room.disambiguation_id = 0
 
             # Merge paths from duplicate rooms into the keeper
             for room_idx, room in rooms[1:]:
