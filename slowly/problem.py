@@ -187,7 +187,6 @@ class Problem:
                 if room.is_complete()
                 else f"PARTIAL ({len(room.get_known_doors())}/6)"
             )
-            paths_str = ", ".join([str(p) for p in room.paths])
 
             # Add absolute-identity information
             if room.is_complete():
@@ -214,7 +213,7 @@ class Problem:
                 )
 
                 print(
-                    f"Room {i}: {fingerprint} [{completeness}] paths=[{paths_str}] | "
+                    f"Room {i}: {fingerprint} [{completeness}] | "
                     f"Absolute ID: {absolute_id} | Connections: {absolute_connections_str} {connection_status}"
                 )
             # Skip printing partial rooms
@@ -727,23 +726,27 @@ class Problem:
                         )
 
                         if destination_room and not destination_room.is_complete():
-                            # We found the blocking partial room - prioritize completing it
+                            # We found the blocking partial room - prioritize completing it with all doors
+                            batch_paths = []
                             for dest_door in range(6):
                                 dest_exploration_path = destination_path + [dest_door]
                                 path_tuple = tuple(dest_exploration_path)
 
                                 if path_tuple not in self.explored_paths:
-                                    unknown_connections.append(
-                                        {
-                                            "from_room": room,
-                                            "door": door,
-                                            "blocking_room": destination_room,
-                                            "path": dest_exploration_path,
-                                            "priority": "complete_blocking_partial_room",
-                                            "reason": f"Complete destination room to verify {room.get_fingerprint()} door {door}",
-                                        }
-                                    )
-                                    return unknown_connections  # Focus on one door at a time
+                                    batch_paths.append(dest_exploration_path)
+                            
+                            if batch_paths:
+                                unknown_connections.append(
+                                    {
+                                        "from_room": room,
+                                        "door": door,
+                                        "blocking_room": destination_room,
+                                        "paths": batch_paths,  # Multiple paths for batch exploration
+                                        "priority": "complete_blocking_partial_room_batch",
+                                        "reason": f"Complete destination room to verify {room.get_fingerprint()} door {door}",
+                                    }
+                                )
+                                return unknown_connections  # Focus on one room at a time
 
                     # Fallback: try direct exploration if no observation yet
                     exploration_path = base_path + [door]
@@ -823,19 +826,19 @@ class Problem:
             # Take the first unknown connection
             connection = unknown_connections[0]
 
-            if connection["priority"] == "complete_blocking_partial_room":
+            if connection["priority"] == "complete_blocking_partial_room_batch":
                 from_room = connection["from_room"]
                 door = connection["door"]
                 blocking_room = connection["blocking_room"]
-                path = connection["path"]
+                paths = connection["paths"]
                 reason = connection["reason"]
 
                 print(f"BLOCKING: {reason}")
                 print(
-                    f"  Completing partial room {blocking_room.get_fingerprint()} by exploring {path}"
+                    f"  Completing partial room {blocking_room.get_fingerprint()} by exploring {len(paths)} doors in batch: {paths}"
                 )
 
-                self.explore([path])
+                self.explore(paths)
             else:
                 print(
                     f"Found {len(unknown_connections)} unknown connections in complete rooms to verify"
