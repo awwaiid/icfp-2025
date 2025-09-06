@@ -163,17 +163,23 @@ class ConnectionProblem:
 
             # Find rooms that need more exploration
             rooms_to_explore = self._find_rooms_needing_exploration()
-            
+
             # If no rooms need basic exploration, check for reverse mapping opportunities
             if not rooms_to_explore:
                 rooms_to_explore = self._find_rooms_for_reverse_mapping()
                 if rooms_to_explore:
-                    print("No rooms need basic exploration, but found rooms for reverse mapping")
+                    print(
+                        "No rooms need basic exploration, but found rooms for reverse mapping"
+                    )
                 else:
                     incomplete = self.table.get_incomplete_connections()
                     if incomplete:
-                        print(f"All rooms explored, but {len(incomplete)} connections still incomplete.")
-                        print("This is expected - we can't determine to_door without more complex exploration.")
+                        print(
+                            f"All rooms explored, but {len(incomplete)} connections still incomplete."
+                        )
+                        print(
+                            "This is expected - we can't determine to_door without more complex exploration."
+                        )
                         break
                     else:
                         print("All connections complete!")
@@ -209,32 +215,36 @@ class ConnectionProblem:
             # Check if we have all 6 doors mapped from this room
             mapped_doors = set(conn.from_door for conn in connections_from_room)
 
-            print(f"  DEBUG: Room {room_id}(L{room_label}) has {len(mapped_doors)}/6 doors mapped: {sorted(mapped_doors)}")
+            print(
+                f"  DEBUG: Room {room_id}(L{room_label}) has {len(mapped_doors)}/6 doors mapped: {sorted(mapped_doors)}"
+            )
 
             if len(mapped_doors) < 6:
                 rooms_needing_exploration.append((room_id, room_label))
 
-        print(f"  DEBUG: {len(rooms_needing_exploration)} rooms need exploration: {rooms_needing_exploration}")
+        print(
+            f"  DEBUG: {len(rooms_needing_exploration)} rooms need exploration: {rooms_needing_exploration}"
+        )
         return rooms_needing_exploration
 
     def _find_rooms_for_reverse_mapping(self) -> List[Tuple[int, int]]:
         """Find rooms that we haven't explored from yet, but know exist as destinations"""
         rooms_for_reverse_mapping = []
 
-        # Get all unique rooms we know about  
+        # Get all unique rooms we know about
         all_known_rooms = set()
         explored_from_rooms = set()  # Rooms we've explored FROM
 
         for conn in self.table.connections:
             all_known_rooms.add((conn.from_room_id, conn.from_room_label))
             explored_from_rooms.add((conn.from_room_id, conn.from_room_label))
-            
+
             if conn.to_room_id is not None and conn.to_room_label is not None:
                 all_known_rooms.add((conn.to_room_id, conn.to_room_label))
 
         # Find rooms we know about but haven't explored from
         unexplored_rooms = all_known_rooms - explored_from_rooms
-        
+
         return list(unexplored_rooms)
 
     def analyze_connections(self):
@@ -277,33 +287,41 @@ class ConnectionProblem:
     def debug_exploration_state(self):
         """Debug current exploration state"""
         print("\n=== Debug Exploration State ===")
-        
+
         # Show all rooms and their door completion
         known_rooms = set()
         for conn in self.table.connections:
             known_rooms.add((conn.from_room_id, conn.from_room_label))
             if conn.to_room_id is not None and conn.to_room_label is not None:
                 known_rooms.add((conn.to_room_id, conn.to_room_label))
-        
+
         print(f"All known rooms ({len(known_rooms)}):")
         for room_id, room_label in sorted(known_rooms):
             connections_from_room = self.table.get_room_connections(room_id)
             mapped_doors = set(conn.from_door for conn in connections_from_room)
-            status = "COMPLETE" if len(mapped_doors) == 6 else f"INCOMPLETE ({len(mapped_doors)}/6)"
-            print(f"  Room {room_id}(L{room_label}): {status} - doors {sorted(mapped_doors)}")
-        
+            status = (
+                "COMPLETE"
+                if len(mapped_doors) == 6
+                else f"INCOMPLETE ({len(mapped_doors)}/6)"
+            )
+            print(
+                f"  Room {room_id}(L{room_label}): {status} - doors {sorted(mapped_doors)}"
+            )
+
         incomplete = self.table.get_incomplete_connections()
         print(f"\nIncomplete connections ({len(incomplete)}):")
         for conn in incomplete[:10]:
             print(f"  {conn}")
-        
+
         # Show what rooms need exploration
         rooms_to_explore = self._find_rooms_needing_exploration()
         print(f"\nResult: {len(rooms_to_explore)} rooms need exploration")
-        
+
         # Show rooms that could help complete connections
         rooms_for_reverse_mapping = self._find_rooms_for_reverse_mapping()
-        print(f"Rooms that could help complete connections: {len(rooms_for_reverse_mapping)}")
+        print(
+            f"Rooms that could help complete connections: {len(rooms_for_reverse_mapping)}"
+        )
         for room_id, room_label in rooms_for_reverse_mapping[:5]:
             print(f"  Room {room_id}(L{room_label})")
 
