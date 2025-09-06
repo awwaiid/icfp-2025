@@ -30,7 +30,8 @@ class ExplorationStrategy:
                 if target_label is not None:
                     # Check if we have a complete room with this label
                     complete_targets = [
-                        r for r in self.room_manager.get_all_rooms()
+                        r
+                        for r in self.room_manager.get_all_rooms()
                         if r.label == target_label and r.is_complete()
                     ]
 
@@ -89,7 +90,7 @@ class ExplorationStrategy:
 
                                 if path_tuple not in self.explored_paths:
                                     batch_paths.append(dest_exploration_path)
-                            
+
                             if batch_paths:
                                 unknown_connections.append(
                                     {
@@ -101,7 +102,9 @@ class ExplorationStrategy:
                                         "reason": f"Complete destination room to verify {room.get_fingerprint()} door {door}",
                                     }
                                 )
-                                return unknown_connections  # Focus on one room at a time
+                                return (
+                                    unknown_connections  # Focus on one room at a time
+                                )
 
                     # Fallback: try direct exploration if no observation yet
                     exploration_path = base_path + [door]
@@ -116,7 +119,9 @@ class ExplorationStrategy:
 
         return unknown_connections
 
-    def get_door_destination_info(self, from_room: Room, door: int) -> Optional[Tuple[List[int], int]]:
+    def get_door_destination_info(
+        self, from_room: Room, door: int
+    ) -> Optional[Tuple[List[int], int]]:
         """Get destination path and label for a door, if we have an observation"""
         for obs in self.observations:
             if len(obs["plan"]) >= 1 and len(obs["rooms"]) >= 2:
@@ -134,7 +139,9 @@ class ExplorationStrategy:
                                 return destination_path, destination_label
         return None
 
-    def find_room_by_path_and_label(self, path: List[int], label: int) -> Optional[Room]:
+    def find_room_by_path_and_label(
+        self, path: List[int], label: int
+    ) -> Optional[Room]:
         """Find a room with the given path and label"""
         for room in self.room_manager.get_all_rooms():
             if room.label == label and path in room.paths:
@@ -207,16 +214,16 @@ class ExplorationStrategy:
             return {
                 "type": "unknown_connections",
                 "data": unknown_connections[0],
-                "priority": 1
+                "priority": 1,
             }
 
         # Second priority: Explore missing connections from complete rooms
         missing_connections = self.get_missing_connections_from_complete_rooms()
         if missing_connections:
             return {
-                "type": "missing_connections", 
+                "type": "missing_connections",
                 "data": missing_connections[0],
-                "priority": 2
+                "priority": 2,
             }
 
         # Third priority: Explore from partial rooms we discovered
@@ -225,7 +232,7 @@ class ExplorationStrategy:
             return {
                 "type": "partial_explorations",
                 "data": partial_explorations[0],
-                "priority": 3
+                "priority": 3,
             }
 
         # Fourth priority: Regular incomplete room exploration
@@ -239,15 +246,15 @@ class ExplorationStrategy:
                     for door in doors_to_explore:
                         plan = base_path + [door]
                         plans.append(plan)
-                    
+
                     return {
                         "type": "incomplete_rooms",
                         "data": {
                             "room": room,
                             "doors": doors_to_explore,
-                            "plans": plans
+                            "plans": plans,
                         },
-                        "priority": 4
+                        "priority": 4,
                     }
 
         return None

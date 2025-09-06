@@ -19,27 +19,27 @@ def main():
         print("Usage: python slowly/run.py <problem_name> <room_count>")
         print("Example: python slowly/run.py secundus 12")
         sys.exit(1)
-    
+
     problem_name = sys.argv[1]
     room_count = int(sys.argv[2])
-    
+
     print(f"=== Running slowly approach on {problem_name} with {room_count} rooms ===")
-    
+
     # Create problem instance
     p = Problem(room_count=room_count)
-    
+
     # Select the problem
     p.select_problem(problem_name)
-    
+
     # Bootstrap to discover starting room
     p.bootstrap(problem_name)
-    
+
     # Explore until complete
     p.explore_until_complete()
-    
+
     # Generate solution
     p.generate_solution()
-    
+
     print(f"\n🎉 Completed! Solution written to solution.json")
     print(f"To submit: python bin/guess solution.json")
 

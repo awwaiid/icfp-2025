@@ -62,7 +62,7 @@ class ApiClient:
                     return {
                         "plans": plans,
                         "results": result["results"],
-                        "response": response
+                        "response": response,
                     }
             except json.JSONDecodeError:
                 print("Failed to parse response JSON")

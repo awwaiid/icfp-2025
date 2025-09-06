@@ -734,7 +734,7 @@ class Problem:
 
                                 if path_tuple not in self.explored_paths:
                                     batch_paths.append(dest_exploration_path)
-                            
+
                             if batch_paths:
                                 unknown_connections.append(
                                     {
@@ -746,7 +746,9 @@ class Problem:
                                         "reason": f"Complete destination room to verify {room.get_fingerprint()} door {door}",
                                     }
                                 )
-                                return unknown_connections  # Focus on one room at a time
+                                return (
+                                    unknown_connections  # Focus on one room at a time
+                                )
 
                     # Fallback: try direct exploration if no observation yet
                     exploration_path = base_path + [door]
@@ -970,37 +972,44 @@ class Problem:
     def explore_until_complete(self, max_iterations=10000):
         """Keep exploring incomplete rooms until all are complete or max iterations reached"""
         print("=== Exploring Until Complete ===")
-        
+
         iteration = 0
         while iteration < max_iterations:
             iteration += 1
             print(f"\n--- Iteration {iteration} ---")
-            
+
             # Check if we have any incomplete rooms or unknown connections
             incomplete_rooms = self.get_incomplete_rooms()
-            
+
             # Also check for unknown connections in complete rooms
             unknown_connections = self.get_unknown_connections_to_verify()
             missing_connections = self.get_missing_connections_from_complete_rooms()
             partial_explorations = self.get_partial_rooms_to_explore()
-            
-            total_work = len(incomplete_rooms) + len(unknown_connections) + len(missing_connections) + len(partial_explorations)
-            
+
+            total_work = (
+                len(incomplete_rooms)
+                + len(unknown_connections)
+                + len(missing_connections)
+                + len(partial_explorations)
+            )
+
             if total_work == 0:
                 print("🎉 All rooms complete and all connections verified!")
                 break
-                
-            print(f"Work remaining: {len(incomplete_rooms)} incomplete rooms, {len(unknown_connections)} unknown connections, {len(missing_connections)} missing connections, {len(partial_explorations)} partial explorations")
-            
+
+            print(
+                f"Work remaining: {len(incomplete_rooms)} incomplete rooms, {len(unknown_connections)} unknown connections, {len(missing_connections)} missing connections, {len(partial_explorations)} partial explorations"
+            )
+
             # Do one round of exploration
             self.explore_incomplete_rooms()
-            
+
             # Show current progress
             self.print_fingerprints()
-        
+
         if iteration >= max_iterations:
             print(f"⚠️  Reached maximum iterations ({max_iterations})")
-        
+
         print(f"\nCompleted after {iteration} iterations")
         return iteration
 
@@ -1091,7 +1100,7 @@ class Problem:
                     for potential_to_door, reverse_abs_id in enumerate(to_connections):
                         if reverse_abs_id == from_abs_id:
                             potential_to_doors.append(potential_to_door)
-                    
+
                     # If we have multiple options, try to find one that hasn't been used yet
                     if potential_to_doors:
                         for potential_to_door in potential_to_doors:
@@ -1105,7 +1114,7 @@ class Problem:
                             if test_connection_key not in connections_set:
                                 to_door = potential_to_door
                                 break
-                        
+
                         # If all potential doors are already used, take the first one
                         if to_door is None:
                             to_door = potential_to_doors[0]

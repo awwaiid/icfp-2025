@@ -21,11 +21,11 @@ class Problem:
     ):
         self.room_count = room_count
         self.user_id = user_id
-        
+
         # Initialize components
         self.observations = []  # Raw API observations
         self.explored_paths = set()  # Track paths we've already explored
-        
+
         self.api_client = ApiClient(user_id)
         self.room_manager = RoomManager(room_count, self.observations)
         self.exploration_strategy = ExplorationStrategy(
@@ -56,13 +56,13 @@ class Problem:
 
         # Use API client to explore
         result = self.api_client.explore(new_plans)
-        
+
         if result and "results" in result:
             # Process each result
             for plan, rooms_result in zip(result["plans"], result["results"]):
                 self.observations.append({"plan": plan, "rooms": rooms_result})
                 self.process_observation(plan, rooms_result)
-        
+
         return result.get("response") if result else None
 
     def process_observation(self, path: List[int], rooms: List[int]):
@@ -77,7 +77,9 @@ class Problem:
 
         # Find or create room for starting position
         print(f"  Looking for starting room with path=[] and label={starting_label}")
-        starting_room = self.room_manager.find_or_create_room_for_path([], starting_label)
+        starting_room = self.room_manager.find_or_create_room_for_path(
+            [], starting_label
+        )
         print(f"  Using starting room: {starting_room}")
 
         # Process each step in the path
@@ -133,7 +135,9 @@ class Problem:
 
     def print_fingerprints(self):
         """Print all discovered room fingerprints with absolute-identity info"""
-        print(f"\n=== Room Fingerprints ({len(self.room_manager.get_all_rooms())} rooms) ===")
+        print(
+            f"\n=== Room Fingerprints ({len(self.room_manager.get_all_rooms())} rooms) ==="
+        )
 
         fingerprint_to_absolute_id = self.room_manager.get_absolute_room_mapping()
 
@@ -184,15 +188,15 @@ class Problem:
     def explore_incomplete_rooms(self):
         """Explore from rooms that have incomplete door information, prioritizing complete room connections"""
         exploration_batch = self.exploration_strategy.get_next_exploration_batch()
-        
+
         if not exploration_batch:
             print("All rooms are complete!")
             return
-        
+
         batch_type = exploration_batch["type"]
         data = exploration_batch["data"]
         priority = exploration_batch["priority"]
-        
+
         if batch_type == "unknown_connections":
             connection = data
             if connection["priority"] == "complete_blocking_partial_room_batch":
@@ -212,7 +216,7 @@ class Problem:
                 print(f"VERIFY: Exploring {connection['priority']} connection")
                 print(f"  Path: {connection['path']}")
                 self.explore([connection["path"]])
-                
+
         elif batch_type == "missing_connections":
             connection = data
             from_room = connection["from_room"]
@@ -226,7 +230,7 @@ class Problem:
             print(f"  Path: {path}")
 
             self.explore([path])
-            
+
         elif batch_type == "partial_explorations":
             exploration = data
             from_room = exploration["from_room"]
@@ -239,7 +243,7 @@ class Problem:
             print(f"  Full path: {path}")
 
             self.explore([path])
-            
+
         elif batch_type == "incomplete_rooms":
             room_data = data
             room = room_data["room"]
@@ -268,37 +272,50 @@ class Problem:
     def explore_until_complete(self, max_iterations: int = 10000):
         """Keep exploring incomplete rooms until all are complete or max iterations reached"""
         print("=== Exploring Until Complete ===")
-        
+
         iteration = 0
         while iteration < max_iterations:
             iteration += 1
             print(f"\n--- Iteration {iteration} ---")
-            
+
             # Check if we have any incomplete rooms or unknown connections
             incomplete_rooms = self.room_manager.get_incomplete_rooms()
-            
+
             # Also check for unknown connections in complete rooms
-            unknown_connections = self.exploration_strategy.get_unknown_connections_to_verify()
-            missing_connections = self.exploration_strategy.get_missing_connections_from_complete_rooms()
-            partial_explorations = self.exploration_strategy.get_partial_rooms_to_explore()
-            
-            total_work = len(incomplete_rooms) + len(unknown_connections) + len(missing_connections) + len(partial_explorations)
-            
+            unknown_connections = (
+                self.exploration_strategy.get_unknown_connections_to_verify()
+            )
+            missing_connections = (
+                self.exploration_strategy.get_missing_connections_from_complete_rooms()
+            )
+            partial_explorations = (
+                self.exploration_strategy.get_partial_rooms_to_explore()
+            )
+
+            total_work = (
+                len(incomplete_rooms)
+                + len(unknown_connections)
+                + len(missing_connections)
+                + len(partial_explorations)
+            )
+
             if total_work == 0:
                 print("🎉 All rooms complete and all connections verified!")
                 break
-                
-            print(f"Work remaining: {len(incomplete_rooms)} incomplete rooms, {len(unknown_connections)} unknown connections, {len(missing_connections)} missing connections, {len(partial_explorations)} partial explorations")
-            
+
+            print(
+                f"Work remaining: {len(incomplete_rooms)} incomplete rooms, {len(unknown_connections)} unknown connections, {len(missing_connections)} missing connections, {len(partial_explorations)} partial explorations"
+            )
+
             # Do one round of exploration
             self.explore_incomplete_rooms()
-            
+
             # Show current progress
             self.print_fingerprints()
-        
+
         if iteration >= max_iterations:
             print(f"⚠️  Reached maximum iterations ({max_iterations})")
-        
+
         print(f"\nCompleted after {iteration} iterations")
         return iteration
 
@@ -315,15 +332,15 @@ class Problem:
             data = json.load(f)
 
         self.observations = data["observations"]
-        
+
         # Reset room manager with new observations
         self.room_manager = RoomManager(self.room_count, self.observations)
-        
+
         # Update strategy with new room manager
         self.exploration_strategy = ExplorationStrategy(
             self.room_manager, self.observations, self.explored_paths
         )
-        
+
         # Update solution generator
         self.solution_generator = SolutionGenerator(self.room_manager)
 
@@ -428,11 +445,13 @@ class Problem:
         # Show all rooms and their door completion
         all_rooms = self.room_manager.get_all_rooms()
         known_rooms = set()
-        
+
         for room in all_rooms:
             if room.is_complete():
                 fingerprint = room.get_fingerprint()
-                absolute_id = self.room_manager.get_absolute_room_mapping().get(fingerprint, "?")
+                absolute_id = self.room_manager.get_absolute_room_mapping().get(
+                    fingerprint, "?"
+                )
                 known_rooms.add((absolute_id, room.label))
 
         print(f"All known complete rooms ({len(known_rooms)}):")
@@ -443,8 +462,14 @@ class Problem:
                     fp = room.get_fingerprint()
                     if self.room_manager.get_absolute_room_mapping().get(fp) == abs_id:
                         connections = self.room_manager.get_absolute_connections(room)
-                        verified_count = sum(1 for conn in connections if conn is not None)
-                        status = "COMPLETE" if verified_count == 6 else f"INCOMPLETE ({verified_count}/6)"
+                        verified_count = sum(
+                            1 for conn in connections if conn is not None
+                        )
+                        status = (
+                            "COMPLETE"
+                            if verified_count == 6
+                            else f"INCOMPLETE ({verified_count}/6)"
+                        )
                         print(f"  Room {abs_id}(L{room_label}): {status}")
                         break
 
@@ -454,6 +479,8 @@ class Problem:
         # Show what exploration options we have
         exploration_batch = self.exploration_strategy.get_next_exploration_batch()
         if exploration_batch:
-            print(f"\nNext exploration: {exploration_batch['type']} (priority {exploration_batch['priority']})")
+            print(
+                f"\nNext exploration: {exploration_batch['type']} (priority {exploration_batch['priority']})"
+            )
         else:
             print("\nNo more exploration needed!")

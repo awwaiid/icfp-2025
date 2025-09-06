@@ -81,7 +81,9 @@ class RoomManager:
 
         return fingerprint_to_absolute_id
 
-    def get_door_destination_fingerprint(self, from_room: Room, door: int) -> Optional[str]:
+    def get_door_destination_fingerprint(
+        self, from_room: Room, door: int
+    ) -> Optional[str]:
         """Determine which specific complete room fingerprint this door leads to"""
         # We need to look at our exploration data to see where this door actually goes
         # from this specific room
@@ -115,7 +117,9 @@ class RoomManager:
 
         return None
 
-    def get_absolute_connections(self, room: Room, debug: bool = False) -> List[Optional[int]]:
+    def get_absolute_connections(
+        self, room: Room, debug: bool = False
+    ) -> List[Optional[int]]:
         """Get absolute-identity connections for a room - based on actual exploration paths"""
         if not room.is_complete():
             return [None] * 6
@@ -191,7 +195,9 @@ class RoomManager:
 
         return removed_count
 
-    def can_trace_path_to_complete_room(self, partial_path: List[int], debug: bool = False) -> Optional[Room]:
+    def can_trace_path_to_complete_room(
+        self, partial_path: List[int], debug: bool = False
+    ) -> Optional[Room]:
         """Check if a partial path can be traced through complete rooms to find its destination"""
         if not partial_path:
             return None
@@ -388,7 +394,7 @@ class RoomManager:
         complete_rooms = self.get_complete_rooms()
         total_connections = 0
         verified_connections = 0
-        
+
         for room in complete_rooms:
             connections = self.get_absolute_connections(room)
             total_connections += len(connections)
@@ -401,5 +407,5 @@ class RoomManager:
             "total_connections": total_connections,
             "verified_connections": verified_connections,
             "max_possible": self.room_count * 6,
-            "unique_rooms": len(set(room.get_fingerprint() for room in complete_rooms))
+            "unique_rooms": len(set(room.get_fingerprint() for room in complete_rooms)),
         }

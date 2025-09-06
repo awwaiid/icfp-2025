@@ -74,7 +74,7 @@ class SolutionGenerator:
                     for potential_to_door, reverse_abs_id in enumerate(to_connections):
                         if reverse_abs_id == from_abs_id:
                             potential_to_doors.append(potential_to_door)
-                    
+
                     # If we have multiple options, try to find one that hasn't been used yet
                     if potential_to_doors:
                         for potential_to_door in potential_to_doors:
@@ -88,7 +88,7 @@ class SolutionGenerator:
                             if test_connection_key not in connections_set:
                                 to_door = potential_to_door
                                 break
-                        
+
                         # If all potential doors are already used, take the first one
                         if to_door is None:
                             to_door = potential_to_doors[0]
