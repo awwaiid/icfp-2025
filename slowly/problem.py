@@ -217,10 +217,7 @@ class Problem:
                     f"Room {i}: {fingerprint} [{completeness}] paths=[{paths_str}] | "
                     f"Absolute ID: {absolute_id} | Connections: {absolute_connections_str} {connection_status}"
                 )
-            else:
-                print(
-                    f"Room {i}: {room.get_fingerprint()} [{completeness}] paths=[{paths_str}]"
-                )
+            # Skip printing partial rooms
 
         if not self.possible_rooms:
             print("No rooms discovered yet.")
@@ -967,6 +964,43 @@ class Problem:
 
                 break  # Explore one room at a time
 
+    def explore_until_complete(self, max_iterations=10000):
+        """Keep exploring incomplete rooms until all are complete or max iterations reached"""
+        print("=== Exploring Until Complete ===")
+        
+        iteration = 0
+        while iteration < max_iterations:
+            iteration += 1
+            print(f"\n--- Iteration {iteration} ---")
+            
+            # Check if we have any incomplete rooms or unknown connections
+            incomplete_rooms = self.get_incomplete_rooms()
+            
+            # Also check for unknown connections in complete rooms
+            unknown_connections = self.get_unknown_connections_to_verify()
+            missing_connections = self.get_missing_connections_from_complete_rooms()
+            partial_explorations = self.get_partial_rooms_to_explore()
+            
+            total_work = len(incomplete_rooms) + len(unknown_connections) + len(missing_connections) + len(partial_explorations)
+            
+            if total_work == 0:
+                print("🎉 All rooms complete and all connections verified!")
+                break
+                
+            print(f"Work remaining: {len(incomplete_rooms)} incomplete rooms, {len(unknown_connections)} unknown connections, {len(missing_connections)} missing connections, {len(partial_explorations)} partial explorations")
+            
+            # Do one round of exploration
+            self.explore_incomplete_rooms()
+            
+            # Show current progress
+            self.print_fingerprints()
+        
+        if iteration >= max_iterations:
+            print(f"⚠️  Reached maximum iterations ({max_iterations})")
+        
+        print(f"\nCompleted after {iteration} iterations")
+        return iteration
+
     def save_observations(self, filename: str):
         """Save observations to file"""
         data = {"observations": self.observations, "room_count": self.room_count}
@@ -1025,14 +1059,11 @@ class Problem:
                 f"Index {index}: Label {room.label} (fingerprint {room.get_fingerprint()})"
             )
 
-        # Generate the solution JSON
+        # Generate the solution JSON (only the map part - bin/guess adds the id)
         solution = {
-            "id": self.user_id,
-            "map": {
-                "rooms": rooms_array,
-                "startingRoom": 0,  # Will be updated below
-                "connections": [],
-            },
+            "rooms": rooms_array,
+            "startingRoom": 0,  # Will be updated below
+            "connections": [],
         }
 
         # Generate connections with proper door mapping, using room indexes
@@ -1088,7 +1119,7 @@ class Problem:
                         if connection_key not in connections_set:
                             connections_set.add(connection_key)
 
-                            solution["map"]["connections"].append(
+                            solution["connections"].append(
                                 {
                                     "from": {
                                         "room": from_index,  # Use index into rooms array
@@ -1108,21 +1139,21 @@ class Problem:
         # Find the actual starting room (the one with empty path) and convert to index
         for abs_id, room in absolute_id_to_room.items():
             if [] in room.paths:
-                solution["map"]["startingRoom"] = absolute_id_to_index[abs_id]
+                solution["startingRoom"] = absolute_id_to_index[abs_id]
                 break
 
-        # Write to file
+        # Write to file with double quotes
         import json
 
         with open(filename, "w") as f:
-            json.dump(solution, f, indent=2)
+            json.dump(solution, f, indent=2, ensure_ascii=False)
 
         print(f"\nSolution written to {filename}")
-        print(f"Rooms: {solution['map']['rooms']}")
+        print(f"Rooms: {solution['rooms']}")
         print(
-            f"Starting room index: {solution['map']['startingRoom']} (label {rooms_array[solution['map']['startingRoom']]})"
+            f"Starting room index: {solution['startingRoom']} (label {rooms_array[solution['startingRoom']]})"
         )
-        print(f"Total connections: {len(solution['map']['connections'])}")
+        print(f"Total connections: {len(solution['connections'])}")
 
         print("\nTo submit, run:")
         print(f"python bin/guess {filename}")
