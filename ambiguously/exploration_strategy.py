@@ -177,28 +177,40 @@ class ExplorationStrategy:
 
         # Find partial rooms that we haven't fully explored from
         partial_rooms = self.room_manager.get_incomplete_rooms()
+        
+        # Always prioritize completing the room with the most door information
+        # Complete one room fully before expanding from others
+        def room_priority_score(room):
+            if not room.door_labels:
+                return (0, 0, id(room))  # No door info - lowest priority
+            known_doors = sum(1 for label in room.door_labels if label is not None)
+            
+            # Prioritize rooms with more door information - complete the most advanced room first
+            return (known_doors, -len(room.paths), -id(room))
+        
+        partial_rooms.sort(key=room_priority_score, reverse=True)
 
+        # Focus on completing the highest priority room (most doors known)
         for room in partial_rooms:
             if not room.paths:
                 continue
 
             base_path = room.paths[0]  # Use first path to reach this room
 
-            # Try to explore all doors from this partial room
+            # Find the first unexplored door from this room
             for door in range(6):
                 exploration_path = base_path + [door]
                 path_tuple = tuple(exploration_path)
 
                 # Only suggest if we haven't explored this path yet
                 if path_tuple not in self.explored_paths:
-                    partial_explorations.append(
-                        {
-                            "from_room": room,
-                            "door": door,
-                            "path": exploration_path,
-                            "priority": "partial_room_expansion",
-                        }
-                    )
+                    # Return just this ONE exploration to focus on completing this room
+                    return [{
+                        "from_room": room,
+                        "door": door,
+                        "path": exploration_path,
+                        "priority": "partial_room_expansion",
+                    }]
 
         return partial_explorations
 

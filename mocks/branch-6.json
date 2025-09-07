@@ -1,0 +1,31 @@
+{
+  "name": "branch",
+  "description": "6-room branching layout - tree structure with different paths",
+  "starting_room": 0,
+  "rooms": [
+    {
+      "label": 0,
+      "connections": [1, 1, 2, 2, 3, 3]
+    },
+    {
+      "label": 1,
+      "connections": [0, 0, 0, 0, 4, 4]
+    },
+    {
+      "label": 2,
+      "connections": [0, 0, 0, 0, 5, 5]
+    },
+    {
+      "label": 1,
+      "connections": [0, 0, 0, 0, 1, 1]
+    },
+    {
+      "label": 3,
+      "connections": [1, 1, 1, 1, 1, 1]
+    },
+    {
+      "label": 3,
+      "connections": [2, 2, 2, 2, 2, 2]
+    }
+  ]
+}

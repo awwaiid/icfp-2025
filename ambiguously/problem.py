@@ -78,7 +78,7 @@ class Problem:
         # Find or create room for starting position
         print(f"  Looking for starting room with path=[] and label={starting_label}")
         starting_room = self.room_manager.find_or_create_room_for_path(
-            [], starting_label
+            [], starting_label, self.api_client
         )
         print(f"  Using starting room: {starting_room}")
 
@@ -103,7 +103,7 @@ class Problem:
                     f"  Looking for destination room with path={path_to_destination} and label={destination_label}"
                 )
                 destination_room = self.room_manager.find_or_create_room_for_path(
-                    path_to_destination, destination_label
+                    path_to_destination, destination_label, self.api_client
                 )
                 print(f"  Using destination room: {destination_room}")
                 
@@ -126,23 +126,29 @@ class Problem:
         print(f"Populated {len(self.explored_paths)} explored paths from observations")
 
     def bootstrap(self, problem_name: str):
-        """Bootstrap by discovering the starting room"""
-        print("=== Bootstrapping Ambiguously ===")
+        """Minimal bootstrap: just create the starting room and prepare for exploration"""
+        print("=== Minimal Bootstrap ===")
 
         # Select problem (uncomment if needed)
         # self.select_problem(problem_name)
 
-        # Explore all doors from starting position
-        plans = [[door] for door in range(6)]
-        self.explore(plans)
-
-        # Remove any duplicates discovered during bootstrap (with disambiguation)
-        removed = self.room_manager.remove_duplicate_rooms(self.api_client)
-        if removed > 0:
-            print(f"Removed {removed} duplicate rooms after bootstrap")
-
-        print("Bootstrap complete!")
+        # Create the starting room with no door information
+        # The main exploration loop will handle discovering all door connections
+        starting_room = self.room_manager.find_or_create_room_for_path(
+            [], 0, self.api_client  # Assume label 0 for starting room
+        )
+        print(f"Created starting room: {starting_room}")
+        print(f"Bootstrap complete - starting room ready for exploration")
+        
         self.print_fingerprints()
+
+    def _consolidate_obvious_duplicates(self):
+        """Consolidate partial rooms that are provably the same based on path tracing
+        
+        NOTE: Path tracing has been removed. Room deduplication now relies entirely on
+        navigation and label editing during the disambiguation phase.
+        """
+        pass
 
     def print_fingerprints(self):
         """Print all discovered room fingerprints with absolute-identity info"""
@@ -267,17 +273,20 @@ class Problem:
             print(f"  Base path: {room.paths[0]}")
 
             self.explore(plans)
+            
+            # Since disambiguation now happens during room creation, we don't need aggressive cleanup
 
-        # After exploration, check for and remove duplicates (with disambiguation)
+        # After all exploration, final check for and remove duplicates (with disambiguation)
         removed = self.room_manager.remove_duplicate_rooms(self.api_client)
         if removed > 0:
             print("Updated room list after removing duplicates:")
             self.print_fingerprints()
 
-        # Clean up redundant partial rooms that can be traced to complete rooms
-        cleaned_partial = self.room_manager.cleanup_all_traceable_partial_rooms()
-        if cleaned_partial > 0:
-            print(f"Cleaned up {cleaned_partial} redundant partial rooms")
+        # DISABLED: Clean up redundant partial rooms that can be traced to complete rooms
+        # This was too aggressive for star layout - peripheral rooms were being incorrectly merged
+        # cleaned_partial = self.room_manager.cleanup_all_traceable_partial_rooms()
+        # if cleaned_partial > 0:
+        #     print(f"Cleaned up {cleaned_partial} redundant partial rooms")
 
         # Check if we can do aggressive cleanup now that we might have complete coverage
         cleaned = self.room_manager.cleanup_all_partial_rooms_when_complete()
@@ -293,19 +302,6 @@ class Problem:
         complete_rooms = self.room_manager.get_complete_rooms()
         unique_complete_count = len(set(room.get_fingerprint() for room in complete_rooms))
         print(f"Initial check: {unique_complete_count} unique complete rooms, target={self.room_count}")
-        
-        if unique_complete_count >= self.room_count:
-            # Check if all connections are verified
-            all_verified = True
-            for room in complete_rooms:
-                connections = self.room_manager.get_absolute_connections(room)
-                if any(conn is None for conn in connections):
-                    all_verified = False
-                    break
-            
-            if all_verified:
-                print(f"🎉 Complete coverage detected at start: {unique_complete_count} unique complete rooms with all connections verified!")
-                return 0
 
         iteration = 0
         while iteration < max_iterations:
@@ -334,8 +330,48 @@ class Problem:
             )
 
             if total_work == 0:
-                print("🎉 All rooms complete and all connections verified!")
-                break
+                # Check if we've found the expected number of rooms
+                unique_rooms = self.room_manager.get_complete_rooms()
+                unique_count = len(unique_rooms)
+                
+                if unique_count >= self.room_count:
+                    print("🎉 All rooms complete and all connections verified!")
+                    break
+                else:
+                    print(f"⚠️ No more exploration work but only found {unique_count}/{self.room_count} unique rooms")
+                    print("This may indicate the exploration strategy missed some rooms")
+                    print("Let's try more aggressive exploration...")
+                    
+                    # Try to find more rooms by exploring deeper paths
+                    # Look for any doors that haven't been fully explored
+                    additional_work_found = False
+                    
+                    for room in unique_rooms:
+                        for door_idx, connection_id in enumerate(self.room_manager.get_absolute_connections(room)):
+                            if connection_id is not None:
+                                dest_room = None
+                                for r in unique_rooms:
+                                    if self.room_manager.get_absolute_room_mapping().get(r.get_fingerprint()) == connection_id:
+                                        dest_room = r
+                                        break
+                                
+                                if dest_room:
+                                    # Try deeper exploration from this connection
+                                    current_paths = [path for path in room.paths if len(path) <= 2]
+                                    if current_paths:
+                                        # Explore one more level deep
+                                        deeper_path = current_paths[0] + [door_idx, 0]  # Add door and first exploration
+                                        try:
+                                            print(f"Trying deeper exploration: {deeper_path}")
+                                            self.explore([[deeper_path]])
+                                            additional_work_found = True
+                                            break
+                                        except:
+                                            pass
+                    
+                    if not additional_work_found:
+                        print("No additional exploration opportunities found")
+                        break
 
             print(
                 f"Work remaining: {len(incomplete_rooms)} incomplete rooms, {len(unknown_connections)} unknown connections, {len(missing_connections)} missing connections, {len(partial_explorations)} partial explorations"
@@ -343,6 +379,21 @@ class Problem:
 
             # Do one round of exploration
             self.explore_incomplete_rooms()
+
+            # After each exploration round, merge rooms with identical partial fingerprints
+            merged_count = self.room_manager.merge_rooms_with_identical_partial_fingerprints(self.api_client)
+            if merged_count > 0:
+                print(f"Merged {merged_count} rooms with identical partial fingerprints")
+            
+            # Consolidate destination paths from newly completed rooms
+            consolidated_count = self.room_manager.consolidate_destination_paths()
+            if consolidated_count > 0:
+                print(f"Consolidated {consolidated_count} destination paths")
+
+            # Also try to remove duplicate rooms using navigation-based testing
+            removed = self.room_manager.remove_duplicate_rooms(self.api_client)
+            if removed > 0:
+                print(f"Removed {removed} duplicate rooms via navigation testing")
 
             # Show current progress
             self.print_fingerprints()

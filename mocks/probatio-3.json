@@ -1,0 +1,19 @@
+{
+  "name": "probatio",
+  "description": "3-room simple layout - original probatio problem for basic testing",
+  "starting_room": 0,
+  "rooms": [
+    {
+      "label": 0,
+      "connections": [1, 2, 2, 1, 2, 2]
+    },
+    {
+      "label": 1,
+      "connections": [0, 0, 1, 1, 1, 0]
+    },
+    {
+      "label": 2,
+      "connections": [0, 0, 0, 0, 0, 0]
+    }
+  ]
+}

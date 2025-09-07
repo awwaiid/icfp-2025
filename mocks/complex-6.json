@@ -1,0 +1,31 @@
+{
+  "name": "complex",
+  "description": "6-room complex layout - multiple interconnections with duplicate labels for disambiguation testing",
+  "starting_room": 0,
+  "rooms": [
+    {
+      "label": 0,
+      "connections": [1, 2, 3, 1, 2, 3]
+    },
+    {
+      "label": 0,
+      "connections": [0, 0, 4, 4, 5, 5]
+    },
+    {
+      "label": 1,
+      "connections": [0, 0, 5, 5, 4, 4]
+    },
+    {
+      "label": 2,
+      "connections": [0, 0, 4, 5, 4, 5]
+    },
+    {
+      "label": 1,
+      "connections": [1, 2, 3, 3, 5, 2]
+    },
+    {
+      "label": 2,
+      "connections": [1, 2, 3, 4, 4, 3]
+    }
+  ]
+}

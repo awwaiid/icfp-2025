@@ -3,6 +3,7 @@ API Client for the ICFP 2025 room exploration problem
 """
 
 import json
+import os
 import requests
 import re
 from typing import List, Optional, Dict, Any, Tuple
@@ -14,10 +15,12 @@ class ApiClient:
     def __init__(
         self,
         user_id: str = "awwaiid@thelackthereof.org zFPVkfKRKAgDUdmVr2Oi1A",
-        base_url: str = "https://31pwr5t6ij.execute-api.eu-west-2.amazonaws.com",
+        base_url: Optional[str] = None,
     ):
         self.user_id = user_id
-        self.base_url = base_url
+        self.base_url = base_url or os.environ.get(
+            "ICFP_API_URL", "https://31pwr5t6ij.execute-api.eu-west-2.amazonaws.com"
+        )
 
     def select_problem(self, problem_name: str) -> requests.Response:
         """Select a problem using the API"""

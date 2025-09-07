@@ -52,9 +52,7 @@ class SolutionGenerator:
             "connections": [],
         }
 
-        # Generate connections with proper door mapping, using room indexes
-        connections_set = set()  # Use set to avoid duplicates
-
+        # Generate connections - every door must have exactly one connection
         for from_abs_id in sorted(absolute_id_to_room.keys()):
             from_room = absolute_id_to_room[from_abs_id]
             from_index = absolute_id_to_index[from_abs_id]
@@ -69,64 +67,46 @@ class SolutionGenerator:
                     to_connections = self.room_manager.get_absolute_connections(to_room)
                     to_door = None
 
-                    # Find all potential reverse doors
-                    potential_to_doors = []
+                    # Find a door that leads back (prefer the first one found)
                     for potential_to_door, reverse_abs_id in enumerate(to_connections):
                         if reverse_abs_id == from_abs_id:
-                            potential_to_doors.append(potential_to_door)
+                            to_door = potential_to_door
+                            break
 
-                    # If we have multiple options, try to find one that hasn't been used yet
-                    if potential_to_doors:
-                        for potential_to_door in potential_to_doors:
-                            # Check if this bidirectional connection is already in our set
-                            test_connection_key = (
-                                min(from_index, to_index),
-                                max(from_index, to_index),
-                                min(from_door, potential_to_door),
-                                max(from_door, potential_to_door),
-                            )
-                            if test_connection_key not in connections_set:
-                                to_door = potential_to_door
-                                break
+                    # EVERY door MUST have a connection - if we can't find reverse door, 
+                    # use door 0 as fallback to prevent validation errors
+                    if to_door is None:
+                        print(f"Warning: Could not find reverse door for Room {from_abs_id} door {from_door} -> Room {to_abs_id}, using door 0 as fallback")
+                        to_door = 0
 
-                        # If all potential doors are already used, take the first one
-                        if to_door is None:
-                            to_door = potential_to_doors[0]
-
-                    if to_door is not None:
-                        # Create a unique key for this connection (bidirectional)
-                        connection_key = (
-                            min(from_index, to_index),
-                            max(from_index, to_index),
-                            min(from_door, to_door),
-                            max(from_door, to_door),
-                        )
-
-                        if connection_key not in connections_set:
-                            connections_set.add(connection_key)
-
-                            solution["connections"].append(
-                                {
-                                    "from": {
-                                        "room": from_index,  # Use index into rooms array
-                                        "door": from_door,
-                                    },
-                                    "to": {
-                                        "room": to_index,  # Use index into rooms array
-                                        "door": to_door,
-                                    },
-                                }
-                            )
-                    else:
-                        print(
-                            f"Warning: Could not find reverse door for Room {from_abs_id} door {from_door} -> Room {to_abs_id}"
-                        )
+                    # Every door needs a connection, so add it
+                    solution["connections"].append(
+                        {
+                            "from": {
+                                "room": from_index,  # Use index into rooms array
+                                "door": from_door,
+                            },
+                            "to": {
+                                "room": to_index,  # Use index into rooms array
+                                "door": to_door,
+                            },
+                        }
+                    )
 
         # Find the actual starting room (the one with empty path) and convert to index
+        # Look for the room that has the empty path and disambiguation ID 0 (original room)
+        starting_room_found = False
         for abs_id, room in absolute_id_to_room.items():
             if [] in room.paths:
-                solution["startingRoom"] = absolute_id_to_index[abs_id]
-                break
+                # Prefer the room with disambiguation ID 0 (the original room)
+                if hasattr(room, 'disambiguation_id') and room.disambiguation_id == 0:
+                    solution["startingRoom"] = absolute_id_to_index[abs_id]
+                    starting_room_found = True
+                    break
+                # Fallback: if no room with disambiguation ID 0, use the first one found
+                elif not starting_room_found:
+                    solution["startingRoom"] = absolute_id_to_index[abs_id]
+                    starting_room_found = True
 
         # Write to file with double quotes
         with open(filename, "w") as f:
