@@ -380,17 +380,17 @@ class Problem:
             # Do one round of exploration
             self.explore_incomplete_rooms()
 
-            # After each exploration round, merge rooms with identical partial fingerprints
-            merged_count = self.room_manager.merge_rooms_with_identical_partial_fingerprints(self.api_client)
-            if merged_count > 0:
-                print(f"Merged {merged_count} rooms with identical partial fingerprints")
+            # Apply the systematic room disambiguation process
+            processed_count = self.room_manager.systematic_room_disambiguation(self.api_client)
+            if processed_count > 0:
+                print(f"Systematically processed {processed_count} rooms for disambiguation")
             
             # Consolidate destination paths from newly completed rooms
             consolidated_count = self.room_manager.consolidate_destination_paths()
             if consolidated_count > 0:
                 print(f"Consolidated {consolidated_count} destination paths")
 
-            # Also try to remove duplicate rooms using navigation-based testing
+            # Also try to remove duplicate rooms using navigation-based testing (backup)
             removed = self.room_manager.remove_duplicate_rooms(self.api_client)
             if removed > 0:
                 print(f"Removed {removed} duplicate rooms via navigation testing")

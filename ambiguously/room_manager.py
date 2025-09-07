@@ -27,59 +27,16 @@ class RoomManager:
         return [room for room in self.possible_rooms if not room.is_complete()]
 
     def find_or_create_room_for_path(self, path: List[int], label: int, api_client=None) -> Room:
-        """Find existing room matching path and label, or create new one with proper verification"""
+        """Find existing room matching path and label, or create new one following systematic process"""
         # First check: Look for existing room with this exact path and label
         for room in self.possible_rooms:
             if path in room.paths and room.label == label:
                 return room
 
-        # Second check: If we have a complete room that points to the same label,
-        # check if this path should be added to an existing destination room
-        if path:  # Don't do this for bootstrap (empty path)
-            # Find complete rooms that might have created this destination
-            for complete_room in self.possible_rooms:
-                if complete_room.is_complete() and complete_room != self:
-                    # Check if this complete room's doors point to our label
-                    for door, door_label in enumerate(complete_room.door_labels):
-                        if door_label == label:
-                            # This complete room has a door leading to our label
-                            # Check if there's an existing room for that door
-                            door_path = complete_room.paths[0] + [door] 
-                            for existing_room in self.possible_rooms:
-                                if door_path in existing_room.paths and existing_room.label == label:
-                                    # Found existing room - add this path to it
-                                    print(f"    Adding path {path} to existing destination room {existing_room.get_fingerprint()}")
-                                    existing_room.add_path(path)
-                                    return existing_room
+        # No early consolidation - let systematic disambiguation handle everything
+        # This ensures star topology peripheral rooms remain separate
 
-        # Third check: Look for complete rooms with same label for navigation testing
-        if api_client and path:  # Don't test during initial bootstrap
-            complete_candidates = [r for r in self.possible_rooms 
-                                 if r.label == label and r.is_complete()]
-            
-            for existing_room in complete_candidates:
-                try:
-                    # Create a temporary room to test against
-                    temp_room = Room(label)
-                    temp_room.add_path(path)
-                    
-                    # Test if they're the same room using navigation
-                    are_different = self.disambiguate_rooms_with_path_navigation(
-                        existing_room, temp_room, api_client
-                    )
-                    
-                    if not are_different:
-                        # They're the same room! Add this path to the existing room
-                        print(f"    Navigation test shows path {path} leads to existing room {existing_room.get_fingerprint()}")
-                        existing_room.add_path(path)
-                        return existing_room
-                    else:
-                        print(f"    Navigation test shows path {path} leads to different room than {existing_room.get_fingerprint()}")
-                except Exception as e:
-                    print(f"    Navigation test failed: {e}")
-                    # Continue to test other rooms
-
-        # If no matches or all tests show different, create new room
+        # Create new room - the systematic disambiguation will happen later
         print(f"    Creating new partial room for path {path} with label {label}")
         new_room = Room(label)
         new_room.add_path(path)
@@ -109,10 +66,10 @@ class RoomManager:
                 
                 # Parse each result to get the adjacent room labels
                 for i, result_data in enumerate(result["results"]):
-                    if "rooms" in result_data and len(result_data["rooms"]) >= len(path) + 2:
+                    if isinstance(result_data, list) and len(result_data) >= len(path) + 2:
                         # The adjacent room label is at index len(path) + 1 
                         # (starting room at 0, intermediate rooms, then destination)
-                        adjacent_label = result_data["rooms"][len(path) + 1]
+                        adjacent_label = result_data[len(path) + 1]
                         adjacent_labels.append(adjacent_label)
                     else:
                         # Couldn't determine this adjacent label
@@ -498,63 +455,14 @@ class RoomManager:
         return merged_count
     
     def consolidate_destination_paths(self) -> int:
-        """Consolidate paths that lead to the same destination room from complete rooms"""
+        """Conservative consolidation - only merge when we're certain paths lead to same room"""
         consolidated_count = 0
         
-        # Find complete rooms that might have multiple paths leading to the same destinations
-        complete_rooms = self.get_complete_rooms()
-        
-        for complete_room in complete_rooms:
-            if not complete_room.door_labels:
-                continue
-                
-            # Group doors by destination label
-            destinations = {}
-            for door, label in enumerate(complete_room.door_labels):
-                if label is not None:
-                    if label not in destinations:
-                        destinations[label] = []
-                    destinations[label].append(door)
-            
-            # For each destination label that has multiple doors
-            for label, doors in destinations.items():
-                if len(doors) > 1:
-                    # Find rooms that correspond to these doors
-                    target_rooms = []
-                    base_path = complete_room.paths[0]
-                    
-                    for door in doors:
-                        door_path = base_path + [door]
-                        for room in self.possible_rooms:
-                            if door_path in room.paths and room.label == label:
-                                target_rooms.append((door, room))
-                    
-                    # If we found multiple rooms for the same destination label, consolidate them
-                    if len(target_rooms) > 1:
-                        # Use the first room as the primary room
-                        primary_door, primary_room = target_rooms[0]
-                        
-                        # Merge all other rooms into the primary room
-                        for door, other_room in target_rooms[1:]:
-                            if other_room != primary_room:
-                                print(f"    Consolidating room {other_room.get_fingerprint()} into {primary_room.get_fingerprint()}")
-                                # Merge paths
-                                for path in other_room.paths:
-                                    primary_room.add_path(path)
-                                
-                                # Merge door information
-                                if other_room.door_labels:
-                                    for i, door_label in enumerate(other_room.door_labels):
-                                        if door_label is not None:
-                                            if i >= len(primary_room.door_labels):
-                                                primary_room.door_labels.extend([None] * (i + 1 - len(primary_room.door_labels)))
-                                            if primary_room.door_labels[i] is None:
-                                                primary_room.door_labels[i] = door_label
-                                
-                                # Remove the consolidated room
-                                if other_room in self.possible_rooms:
-                                    self.possible_rooms.remove(other_room)
-                                    consolidated_count += 1
+        # DISABLED for now - this logic was too aggressive and incorrectly merged 
+        # different rooms that happened to have the same label (like in star-6)
+        # 
+        # The correct approach is to let rooms become complete first, then use
+        # navigation-based verification in remove_duplicate_rooms()
         
         return consolidated_count
     
@@ -657,6 +565,112 @@ class RoomManager:
         
         return return_doors
     
+    def systematic_room_disambiguation(self, api_client=None) -> int:
+        """Systematic universal process for room disambiguation
+        
+        Algorithm:
+        1. First complete the full fingerprint for room A
+        2. For each new room B, get its partial fingerprint  
+        3. Test room B against ALL existing rooms with matching partial fingerprints
+        4. Assign appropriate disambiguation IDs
+        
+        Returns number of rooms processed
+        """
+        if not api_client:
+            return 0
+            
+        processed_count = 0
+        
+        # Step 1: Find all complete rooms (these have full fingerprints)
+        complete_rooms = [room for room in self.possible_rooms if room.is_complete()]
+        
+        # Step 2: Find incomplete rooms that need to be tested
+        incomplete_rooms = [room for room in self.possible_rooms if not room.is_complete()]
+        
+        for incomplete_room in incomplete_rooms:
+            # Try to get complete information for this room
+            if len(incomplete_room.paths) == 0:
+                continue
+                
+            # Get the door labels for this room
+            path = incomplete_room.paths[0]
+            adjacent_labels = self._get_potential_adjacent_labels(path, incomplete_room.label, api_client)
+            
+            if adjacent_labels and len(adjacent_labels) == 6:
+                # Now we have complete information - update the room
+                incomplete_room.door_labels = adjacent_labels[:]
+                print(f"Completed room with path {path}: {incomplete_room.get_fingerprint(include_disambiguation=False)}")
+                
+                # Step 3: Test against ALL existing complete rooms with matching partial fingerprint
+                partial_fingerprint = incomplete_room.get_fingerprint(include_disambiguation=False)
+                matching_complete_rooms = []
+                
+                for complete_room in complete_rooms:
+                    if complete_room.get_fingerprint(include_disambiguation=False) == partial_fingerprint:
+                        matching_complete_rooms.append(complete_room)
+                
+                if matching_complete_rooms:
+                    print(f"Found {len(matching_complete_rooms)} existing rooms with matching fingerprint {partial_fingerprint}")
+                    
+                    # Test against each matching room to see if they're different
+                    disambiguation_id = 0
+                    is_different_from_all = True
+                    
+                    for existing_room in matching_complete_rooms:
+                        try:
+                            are_different = self.disambiguate_rooms_with_path_navigation(
+                                existing_room, incomplete_room, api_client
+                            )
+                            
+                            if not are_different:
+                                # Same room - merge paths
+                                print(f"Room is SAME as existing room {existing_room.get_fingerprint()}")
+                                for path in incomplete_room.paths:
+                                    if path not in existing_room.paths:
+                                        existing_room.add_path(path)
+                                
+                                # Remove the duplicate room
+                                if incomplete_room in self.possible_rooms:
+                                    self.possible_rooms.remove(incomplete_room)
+                                
+                                is_different_from_all = False
+                                processed_count += 1
+                                break
+                            else:
+                                print(f"Room is DIFFERENT from existing room {existing_room.get_fingerprint()}")
+                                # Keep track of the highest disambiguation ID
+                                if hasattr(existing_room, 'disambiguation_id') and existing_room.disambiguation_id is not None:
+                                    disambiguation_id = max(disambiguation_id, existing_room.disambiguation_id + 1)
+                                else:
+                                    disambiguation_id = 1
+                                    
+                        except Exception as e:
+                            print(f"Disambiguation test failed: {e}")
+                            # Assume different if test fails
+                            disambiguation_id = max(disambiguation_id, len(matching_complete_rooms))
+                    
+                    if is_different_from_all:
+                        # This is a new distinct room - assign disambiguation ID
+                        incomplete_room.disambiguation_id = disambiguation_id
+                        print(f"Assigned disambiguation ID {disambiguation_id} to new room: {incomplete_room.get_fingerprint()}")
+                        complete_rooms.append(incomplete_room)  # Add to complete rooms
+                        processed_count += 1
+                        
+                        # Ensure existing rooms have disambiguation IDs too
+                        for existing_room in matching_complete_rooms:
+                            if not hasattr(existing_room, 'disambiguation_id') or existing_room.disambiguation_id is None:
+                                existing_room.disambiguation_id = 0
+                                print(f"Assigned disambiguation ID 0 to existing room: {existing_room.get_fingerprint()}")
+                
+                else:
+                    # No matching rooms - this is unique
+                    incomplete_room.disambiguation_id = 0
+                    print(f"New unique room: {incomplete_room.get_fingerprint()}")
+                    complete_rooms.append(incomplete_room)
+                    processed_count += 1
+        
+        return processed_count
+
     def disambiguate_rooms_with_path_navigation(self, room_a: Room, room_b: Room, api_client) -> bool:
         """Use path navigation and label editing to determine if two rooms are actually different
         
@@ -728,7 +742,8 @@ class RoomManager:
         
         # TODO: Handle more complex path relationships (A->B via different routes)
         print("No simple path from A to B found for disambiguation")
-        return False
+        # If we can't test, assume rooms are different (conservative approach for star topology)
+        return True
 
     def cleanup_all_partial_rooms_when_complete(self) -> int:
         """Remove all partial rooms when we have complete room coverage"""
