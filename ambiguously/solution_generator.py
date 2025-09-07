@@ -56,7 +56,10 @@ class SolutionGenerator:
         for from_abs_id in sorted(absolute_id_to_room.keys()):
             from_room = absolute_id_to_room[from_abs_id]
             from_index = absolute_id_to_index[from_abs_id]
-            connections = self.room_manager.get_absolute_connections(from_room)
+            # Try systematic connections first, fallback to observation-based connections
+            connections = self.room_manager.get_systematic_connections(from_room, debug=False)
+            if all(conn is None for conn in connections):
+                connections = self.room_manager.get_absolute_connections(from_room)
 
             for from_door, to_abs_id in enumerate(connections):
                 if to_abs_id is not None:

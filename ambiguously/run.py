@@ -39,8 +39,13 @@ def main():
     # Bootstrap to discover starting room
     p.bootstrap(problem_name)
 
-    # Explore until complete
-    p.explore_until_complete()
+    # Test the new systematic exploration algorithm
+    print("\n=== Testing Systematic Exploration Algorithm ===")
+    p.explore_systematic()
+    
+    # Show results
+    print("\n=== Systematic Exploration Results ===")
+    p.print_fingerprints()
 
     # Generate solution
     p.generate_solution()

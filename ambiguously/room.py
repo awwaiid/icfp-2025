@@ -8,11 +8,19 @@ from typing import List, Optional
 class Room:
     """A room identified by paths, label, and adjacency fingerprint"""
 
-    def __init__(self, label: Optional[int] = None):
+    def __init__(self, label: Optional[int] = None, parent=None, parent_door: Optional[int] = None):
         self.label = label  # Room label (0, 1, 2, 3)
         self.paths = []  # List of paths used to reach this room
         self.door_labels = [None] * 6  # Labels of rooms reachable through each door
         self.disambiguation_id = None  # ID to distinguish rooms with identical base fingerprints
+        
+        # New systematic exploration properties
+        self.parent = parent  # Parent room that leads to this room
+        self.parent_door = parent_door  # Which door from parent leads to this room
+        self.path_to_root = []  # Path from this room back to root room
+        self.path_from_root = []  # Path from root to reach this room
+        self.is_done = False  # Whether this room has been fully explored
+        self.door_rooms = [None] * 6  # References to actual Room objects through each door
 
     def add_path(self, path: List[int]):
         """Add a path that leads to this room"""
@@ -65,6 +73,236 @@ class Room:
     def get_unknown_doors(self) -> List[int]:
         """Get list of doors where we don't know the destination label"""
         return [i for i, label in enumerate(self.door_labels) if label is None]
+
+    def peek_adjacent_rooms(self, api_client) -> List[Optional[int]]:
+        """Peek at all adjacent rooms through each door and get their labels
+        
+        Uses the first available path to this room and explores each door.
+        Returns a list of 6 labels (one for each door 0-5), or None if door cannot be explored.
+        
+        Args:
+            api_client: ApiClient instance for making exploration requests
+            
+        Returns:
+            List of 6 integers representing the labels of adjacent rooms, or None for unexplorable doors
+        """
+        if not self.paths or not api_client:
+            return [None] * 6
+
+        # Use the first path to reach this room
+        base_path = self.paths[0]
+        base_path_string = "".join(str(door) for door in base_path)
+        
+        adjacent_labels = []
+        explore_plans = []
+        
+        # Create exploration plans for each door
+        for door in range(6):
+            explore_plan = base_path_string + str(door)
+            explore_plans.append(explore_plan)
+        
+        try:
+            # Execute all explorations at once
+            result = api_client.explore(explore_plans)
+            
+            if result and "results" in result and len(result["results"]) == 6:
+                # Parse each result to get the adjacent room labels
+                for i, result_data in enumerate(result["results"]):
+                    if isinstance(result_data, list) and len(result_data) >= len(base_path) + 2:
+                        # The adjacent room label is at position len(base_path) + 1
+                        adjacent_label = result_data[len(base_path) + 1]
+                        adjacent_labels.append(adjacent_label)
+                    else:
+                        # Couldn't determine this adjacent label
+                        adjacent_labels.append(None)
+            else:
+                # Failed to get results
+                adjacent_labels = [None] * 6
+                
+        except Exception as e:
+            print(f"Error in peek_adjacent_rooms: {e}")
+            adjacent_labels = [None] * 6
+        
+        return adjacent_labels
+
+    def calculate_backlink(self, parent_room, api_client):
+        """Calculate which door leads back to the parent room
+        
+        Algorithm:
+        1. For each of our doors (0-5), navigate: parent_path + [edit_label] + self_path + door
+        2. The door that leads to a room showing the edit_label is the backlink
+        3. Set path_to_root = [backlink_door] + parent.path_to_root
+        """
+        if not parent_room or not parent_room.paths or not self.paths:
+            return None
+            
+        # Get paths to parent and self
+        parent_path = parent_room.paths[0] if parent_room.paths else []
+        self_path = self.paths[0] if self.paths else []
+        
+        # Choose a unique label for editing (different from parent's and self's original labels)
+        edit_label = None
+        for candidate in [1, 2, 3, 0]:  # Try different labels
+            if candidate != parent_room.label and candidate != self.label:
+                edit_label = candidate
+                break
+                
+        if edit_label is None:
+            print(f"Cannot find unique edit label for backlink calculation")
+            return None
+        
+        print(f"Calculating backlink from {self} to {parent_room} using edit label {edit_label}")
+        
+        try:
+            # Build exploration plans: parent_path + [edit] + self_path + door for each door
+            parent_path_str = "".join(str(d) for d in parent_path)
+            self_path_str = "".join(str(d) for d in self_path)
+            
+            explore_plans = []
+            for door in range(6):
+                # Plan: go to parent, edit its label, go to self, go through door
+                plan = parent_path_str + f"[{edit_label}]" + self_path_str + str(door)
+                explore_plans.append(plan)
+            
+            print(f"    Testing doors with plans: {explore_plans}")
+            
+            # Execute all explorations in single API call
+            result = api_client.explore(explore_plans)
+            
+            if result and "results" in result and len(result["results"]) == 6:
+                # Check each result to see which door leads to the edited parent
+                backlink_door = None
+                for door in range(6):
+                    result_data = result["results"][door]
+                    if isinstance(result_data, list) and len(result_data) > 0:
+                        # Get the final room label after going through this door
+                        final_label = result_data[-1]
+                        print(f"    Door {door}: raw_result={result_data}, final_label={final_label}")
+                        
+                        if final_label == edit_label:
+                            backlink_door = door
+                            print(f"Found backlink: door {door} leads to parent (final label {final_label} matches edit {edit_label})")
+                            break
+                
+                if backlink_door is not None:
+                    # Build path_to_root: backlink_door + parent's path_to_root
+                    self.path_to_root = [backlink_door] + parent_room.path_to_root
+                    print(f"Set path_to_root for {self}: {self.path_to_root}")
+                    return backlink_door
+                else:
+                    print(f"Could not determine backlink door - no door showed edit_label {edit_label}")
+                    
+        except Exception as e:
+            print(f"Error calculating backlink: {e}")
+            
+        return None
+
+    def unique_or_merged(self, all_rooms, api_client):
+        """Find if this room is unique or should be merged with an existing room
+        
+        Returns the canonical room (either self if unique, or existing room if merged)
+        """
+        if not self.door_labels or len([l for l in self.door_labels if l is not None]) < 6:
+            # Can't disambiguate without complete partial fingerprint
+            return self
+            
+        # Get partial fingerprint
+        partial_fp = self.get_fingerprint(include_disambiguation=False)
+        similar_rooms = []
+        max_disambiguation_id = -1
+        
+        # Find rooms with same partial fingerprint
+        for room in all_rooms:
+            if room != self and room.get_fingerprint(include_disambiguation=False) == partial_fp:
+                similar_rooms.append(room)
+                if hasattr(room, 'disambiguation_id') and room.disambiguation_id is not None:
+                    max_disambiguation_id = max(max_disambiguation_id, room.disambiguation_id)
+        
+        if not similar_rooms:
+            # This room is unique - assign disambiguation_id 0
+            self.disambiguation_id = 0
+            print(f"Room {self} is unique - assigned disambiguation_id 0")
+            return self
+        
+        print(f"Found {len(similar_rooms)} similar rooms with fingerprint {partial_fp}")
+        
+        # Test against each similar room using path navigation
+        for similar_room in similar_rooms:
+            try:
+                if self._test_rooms_are_same(similar_room, api_client):
+                    # Rooms are the same - merge into the canonical room
+                    print(f"Room {self} is SAME as {similar_room} - merging")
+                    # Add our path to the canonical room
+                    for path in self.paths:
+                        if path not in similar_room.paths:
+                            similar_room.add_path(path)
+                    return similar_room
+                else:
+                    print(f"Room {self} is DIFFERENT from {similar_room}")
+                    
+            except Exception as e:
+                print(f"Disambiguation test failed: {e} - assuming different")
+        
+        # If we get here, this room is unique among the similar rooms
+        self.disambiguation_id = max_disambiguation_id + 1
+        print(f"Room {self} is unique - assigned disambiguation_id {self.disambiguation_id}")
+        return self
+
+    def _test_rooms_are_same(self, other_room, api_client):
+        """Test if this room and other_room are actually the same room"""
+        if not hasattr(self, 'path_from_root') or not hasattr(other_room, 'path_from_root'):
+            # Can't test without proper paths
+            return False
+        
+        if not hasattr(self, 'path_to_root') or self.path_to_root is None:
+            # Can't test without backlink
+            return False
+            
+        # Choose unique edit label
+        edit_label = None
+        for candidate in [1, 2, 3, 0]:
+            if candidate != self.label and candidate != other_room.label:
+                edit_label = candidate
+                break
+                
+        if edit_label is None:
+            return False
+        
+        try:
+            # Proper plan: navigate to self, edit label, use backlink to return to root, then navigate to other
+            path_to_self_str = "".join(str(d) for d in self.path_from_root)
+            path_to_root_str = "".join(str(d) for d in self.path_to_root)
+            path_to_other_str = "".join(str(d) for d in other_room.path_from_root)
+            
+            plan_str = path_to_self_str + f"[{edit_label}]" + path_to_root_str + path_to_other_str
+            
+            print(f"Testing if rooms are same with plan: {plan_str}")
+            print(f"  self.path_from_root={self.path_from_root}, self.path_to_root={self.path_to_root}")
+            print(f"  other.path_from_root={other_room.path_from_root}")
+            
+            result = api_client.explore([plan_str])
+            
+            if result and "results" in result and len(result["results"]) == 1:
+                result_data = result["results"][0]
+                print(f"  Raw result: {result_data}")
+                
+                actual_labels, echo_labels = api_client.parse_response_with_echoes(plan_str, result_data)
+                print(f"  Parsed: actual_labels={actual_labels}, echo_labels={echo_labels}")
+                
+                if actual_labels:
+                    final_label = actual_labels[-1]
+                    print(f"  Final label: {final_label}, expecting edit_label: {edit_label}")
+                    # If final room shows the edit we made to the first room, they're the same room
+                    return final_label == edit_label
+                    
+        except Exception as e:
+            print(f"Room similarity test failed: {e}")
+            
+        return False
+
+    def set_done(self):
+        """Mark this room as fully explored"""
+        self.is_done = True
 
     def __str__(self):
         paths_str = ", ".join([str(p) for p in self.paths]) if self.paths else "[]"

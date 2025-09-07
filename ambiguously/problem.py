@@ -294,6 +294,308 @@ class Problem:
             print("Final clean room list:")
             self.print_fingerprints()
 
+    def explore_with_connection_queue(self, max_iterations: int = 1000):
+        """Queue-based exploration that systematically completes room connections
+        
+        Algorithm:
+        1. Start with incomplete rooms in queue
+        2. For each room: use peek_adjacent_rooms() to get complete partial fingerprint
+        3. Update room's door_labels with the adjacent room labels
+        4. Add all connected rooms to queue if not already verified
+        5. Use disambiguation for rooms with identical partial fingerprints
+        6. Continue until queue is empty or we have enough rooms
+        """
+        from collections import deque
+        
+        print("=== Queue-Based Connection Exploration ===")
+        
+        # Initialize queue with incomplete rooms
+        room_queue = deque()
+        processed_rooms = set()  # Track rooms we've already processed
+        
+        # Add all existing incomplete rooms to queue
+        incomplete_rooms = self.room_manager.get_incomplete_rooms()
+        for room in incomplete_rooms:
+            if room.paths:  # Only queue rooms with paths
+                room_queue.append(room)
+                print(f"Queued incomplete room: {room}")
+        
+        # If no incomplete rooms, try to add some complete rooms to verify connections
+        if not room_queue:
+            complete_rooms = self.room_manager.get_complete_rooms()
+            for room in complete_rooms[:3]:  # Add first few complete rooms
+                room_queue.append(room)
+                print(f"Queued complete room for connection verification: {room}")
+        
+        iteration = 0
+        while room_queue and iteration < max_iterations:
+            iteration += 1
+            current_room = room_queue.popleft()
+            
+            # Skip if we've already processed this room
+            room_key = (tuple(current_room.paths[0]) if current_room.paths else (), current_room.label)
+            if room_key in processed_rooms:
+                continue
+                
+            processed_rooms.add(room_key)
+            print(f"\n--- Iteration {iteration}: Processing room {current_room} ---")
+            
+            # Step 1: Complete this room's partial fingerprint using peek_adjacent_rooms
+            if not current_room.is_complete():
+                print("Getting complete adjacent room information...")
+                adjacent_labels = current_room.peek_adjacent_rooms(self.api_client)
+                
+                if adjacent_labels and len(adjacent_labels) == 6:
+                    # Update room's door labels
+                    current_room.door_labels = adjacent_labels[:]
+                    print(f"Updated room partial fingerprint: {current_room.get_fingerprint(include_disambiguation=False)}")
+                    
+                    # Step 2: Check for disambiguation needed
+                    self._handle_room_disambiguation(current_room)
+                    
+                else:
+                    print(f"Failed to get adjacent room labels for {current_room}")
+                    continue
+            
+            # Step 3: Add connected rooms to queue if not already processed
+            if current_room.is_complete():
+                print("Room is complete - checking connections...")
+                for door, adjacent_label in enumerate(current_room.door_labels):
+                    if adjacent_label is not None:
+                        # Find or create rooms with this label that we can reach
+                        connected_rooms = self._find_or_create_connected_rooms(current_room, door, adjacent_label)
+                        
+                        for connected_room in connected_rooms:
+                            connected_key = (tuple(connected_room.paths[0]) if connected_room.paths else (), connected_room.label)
+                            if connected_key not in processed_rooms and connected_room not in room_queue:
+                                room_queue.append(connected_room)
+                                print(f"  Queued connected room via door {door}: {connected_room}")
+            
+            # Step 4: Check if we have enough complete rooms
+            complete_rooms = self.room_manager.get_complete_rooms()
+            unique_complete_count = len(set(room.get_fingerprint() for room in complete_rooms))
+            print(f"Progress: {unique_complete_count}/{self.room_count} unique complete rooms")
+            
+            if unique_complete_count >= self.room_count:
+                print(f"🎉 Target reached! Found {unique_complete_count} complete rooms")
+                break
+                
+            # Step 5: Remove duplicates periodically
+            if iteration % 5 == 0:
+                removed = self.room_manager.remove_duplicate_rooms(self.api_client)
+                if removed > 0:
+                    print(f"Removed {removed} duplicate rooms during processing")
+        
+        print(f"\nQueue-based exploration completed after {iteration} iterations")
+        print(f"Rooms processed: {len(processed_rooms)}")
+        print(f"Queue remaining: {len(room_queue)}")
+        
+        return iteration
+
+    def _handle_room_disambiguation(self, room):
+        """Handle disambiguation for a room with complete partial fingerprint"""
+        base_fp = room.get_fingerprint(include_disambiguation=False)
+        
+        # Find other complete rooms with same base fingerprint
+        matching_rooms = []
+        for other_room in self.room_manager.get_complete_rooms():
+            if other_room != room and other_room.get_fingerprint(include_disambiguation=False) == base_fp:
+                matching_rooms.append(other_room)
+        
+        if matching_rooms:
+            print(f"Found {len(matching_rooms)} rooms with same base fingerprint - need disambiguation")
+            
+            # Use existing disambiguation logic
+            for other_room in matching_rooms:
+                if hasattr(other_room, 'disambiguation_id') and other_room.disambiguation_id is not None:
+                    continue  # Already disambiguated
+                    
+                try:
+                    are_different = self.room_manager.disambiguate_rooms_with_path_navigation(
+                        room, other_room, self.api_client
+                    )
+                    
+                    if are_different:
+                        # Assign disambiguation IDs
+                        if not hasattr(room, 'disambiguation_id') or room.disambiguation_id is None:
+                            room.disambiguation_id = 0
+                        if not hasattr(other_room, 'disambiguation_id') or other_room.disambiguation_id is None:
+                            other_room.disambiguation_id = 1
+                        print(f"Rooms confirmed different - assigned IDs: {room.get_fingerprint()}, {other_room.get_fingerprint()}")
+                    else:
+                        # Same room - merge paths
+                        print(f"Rooms confirmed same - merging paths")
+                        for path in other_room.paths:
+                            if path not in room.paths:
+                                room.add_path(path)
+                        if other_room in self.room_manager.possible_rooms:
+                            self.room_manager.possible_rooms.remove(other_room)
+                            
+                except Exception as e:
+                    print(f"Disambiguation failed: {e} - assuming different")
+                    if not hasattr(room, 'disambiguation_id') or room.disambiguation_id is None:
+                        room.disambiguation_id = 0
+                    if not hasattr(other_room, 'disambiguation_id') or other_room.disambiguation_id is None:
+                        other_room.disambiguation_id = len(matching_rooms)
+        else:
+            # Unique room - assign ID 0
+            if not hasattr(room, 'disambiguation_id') or room.disambiguation_id is None:
+                room.disambiguation_id = 0
+
+    def _find_or_create_connected_rooms(self, from_room, door, target_label):
+        """Find or create rooms that are connected through a specific door"""
+        if not from_room.paths:
+            return []
+            
+        # Create path to reach the connected room
+        base_path = from_room.paths[0]
+        connected_path = base_path + [door]
+        
+        # Look for existing rooms with this path and label
+        existing_rooms = []
+        for room in self.room_manager.get_all_rooms():
+            if room.label == target_label and connected_path in room.paths:
+                existing_rooms.append(room)
+        
+        if existing_rooms:
+            return existing_rooms
+        
+        # Create new room if none exists
+        new_room = self.room_manager.find_or_create_room_for_path(connected_path, target_label, self.api_client)
+        return [new_room] if new_room else []
+
+    def explore_systematic(self, max_iterations: int = 1000):
+        """Systematic exploration algorithm following the pseudocode exactly
+        
+        Algorithm:
+        1. Bootstrap by creating root room with disambiguation_id = 0
+        2. Queue-based exploration: process each room completely before moving to next
+        3. For each room: create child rooms through each door, with disambiguation
+        4. Calculate backlinks and build proper parent-child relationships
+        5. Continue until queue empty or target room count reached
+        """
+        from collections import deque
+        
+        print("=== Systematic Exploration Algorithm ===")
+        
+        # First, bootstrap by creating root room
+        all_rooms = []  # Global room registry
+        
+        # Get the starting room (should already exist from bootstrap)
+        existing_rooms = self.room_manager.get_all_rooms()
+        if not existing_rooms:
+            print("No existing rooms found - need to bootstrap first")
+            return 0
+            
+        root_room = existing_rooms[0]  # Use first room as root
+        print(f"Using root room: {root_room}")
+        
+        # Make sure root room has complete partial fingerprint
+        if not root_room.is_complete():
+            print("Completing root room partial fingerprint...")
+            adjacent_labels = root_room.peek_adjacent_rooms(self.api_client)
+            if adjacent_labels and len(adjacent_labels) == 6:
+                root_room.door_labels = adjacent_labels[:]
+                print(f"Root room completed: {root_room.get_fingerprint(include_disambiguation=False)}")
+            else:
+                print("Failed to complete root room")
+                return 0
+        
+        # Set root room properties
+        root_room.disambiguation_id = 0  # Root is official immediately
+        root_room.path_to_root = []  # Root has empty path to self
+        root_room.path_from_root = []  # Root is reached by empty path from self
+        all_rooms.append(root_room)
+        
+        # Initialize exploration queue
+        rooms_to_explore_queue = deque([root_room])
+        
+        iteration = 0
+        while rooms_to_explore_queue and iteration < max_iterations:
+            iteration += 1
+            current_room = rooms_to_explore_queue.popleft()
+            
+            print(f"\n--- Systematic Iteration {iteration}: Exploring {current_room} ---")
+            
+            # Skip if room is already done
+            if current_room.is_done:
+                print("Room already done - skipping")
+                continue
+            
+            # Process each door (0-5)
+            for door in range(6):
+                door_label = current_room.door_labels[door]
+                print(f"Processing door {door} -> label {door_label}")
+                
+                # Create path to child room
+                if current_room.paths:
+                    child_path = current_room.paths[0] + [door]
+                else:
+                    child_path = [door]
+                
+                # Create child room
+                child_room = Room(label=door_label, parent=current_room, parent_door=door)
+                child_room.add_path(child_path)
+                
+                # Set path_from_root: parent's path_from_root + door
+                child_room.path_from_root = current_room.path_from_root + [door]
+                
+                # Get complete partial fingerprint for child
+                print(f"  Getting partial fingerprint for child room...")
+                adjacent_labels = child_room.peek_adjacent_rooms(self.api_client)
+                
+                if adjacent_labels and len(adjacent_labels) == 6:
+                    child_room.door_labels = adjacent_labels[:]
+                    print(f"  Child partial fingerprint: {child_room.get_fingerprint(include_disambiguation=False)}")
+                    
+                    # Calculate backlink to parent
+                    print(f"  Calculating backlink to parent...")
+                    backlink_door = child_room.calculate_backlink(current_room, self.api_client)
+                    if backlink_door is not None:
+                        print(f"  Backlink calculated: door {backlink_door} leads to parent")
+                    
+                    # Disambiguate and get canonical room
+                    canonical_room = child_room.unique_or_merged(all_rooms, self.api_client)
+                    
+                    # Set door reference in parent
+                    current_room.door_rooms[door] = canonical_room
+                    
+                    # Add to global registry if it's a new room
+                    if canonical_room not in all_rooms:
+                        all_rooms.append(canonical_room)
+                        print(f"  Added new room to registry: {canonical_room.get_fingerprint()}")
+                    
+                    # Queue for exploration if not done
+                    if not canonical_room.is_done:
+                        rooms_to_explore_queue.append(canonical_room)
+                        print(f"  Queued child room for exploration")
+                    
+                else:
+                    print(f"  Failed to get complete partial fingerprint for child")
+            
+            # Mark current room as done
+            current_room.set_done()
+            print(f"Marked {current_room} as done")
+            
+            # Check progress
+            complete_rooms = [r for r in all_rooms if r.is_complete() and hasattr(r, 'disambiguation_id') and r.disambiguation_id is not None]
+            print(f"Progress: {len(complete_rooms)}/{self.room_count} complete rooms")
+            
+            if len(complete_rooms) >= self.room_count:
+                print(f"🎉 Target reached! Found {len(complete_rooms)} complete rooms")
+                break
+        
+        print(f"\nSystematic exploration completed after {iteration} iterations")
+        print(f"Total rooms in registry: {len(all_rooms)}")
+        print(f"Rooms remaining in queue: {len(rooms_to_explore_queue)}")
+        
+        # Update the room manager with our systematic rooms
+        self.room_manager.possible_rooms = all_rooms
+        
+        # Connection mappings are handled by get_systematic_connections method
+        
+        return iteration
+
     def explore_until_complete(self, max_iterations: int = 10000):
         """Keep exploring incomplete rooms until all are complete or max iterations reached"""
         print("=== Exploring Until Complete ===")
@@ -307,6 +609,14 @@ class Problem:
         while iteration < max_iterations:
             iteration += 1
             print(f"\n--- Iteration {iteration} ---")
+
+            # Early termination check: if we have enough complete rooms, stop
+            complete_rooms = self.room_manager.get_complete_rooms()
+            unique_complete_count = len(complete_rooms)
+            
+            if unique_complete_count >= self.room_count:
+                print(f"🎉 Found {unique_complete_count} complete rooms - target reached!")
+                break
 
             # Check if we have any incomplete rooms or unknown connections
             incomplete_rooms = self.room_manager.get_incomplete_rooms()

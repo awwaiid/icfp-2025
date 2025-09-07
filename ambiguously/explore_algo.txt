@@ -1,0 +1,68 @@
+
+This is pseudocode exploration algorithm
+A partial fingerprint is the room label and the label of the 6 rooms through the doors
+There can be two rooms with the same partial fingerprint, and if they are really distinct then we set their disambiguation_id
+
+
+First, boot strap by creating one room {
+  r0 = Room()
+  path_labels = explore([]) # returns just one label of the first room
+  r0.label = path_labels[0]
+  r0.peek_adjacent_rooms() # get the rest of the partial fingerprint
+  r0.disambiguation_id = 0 # We can declare this one official immediately
+  rooms_to_explore_queue = [r0]
+  all_rooms.add(r0)
+}
+
+Next, loop until we've explored everything
+while len(rooms_to_explore_queue) > 0 {
+    room = rooms_to_explore_queue.pop()
+    next if room.is_done
+    for each door in 0..5 {
+        door_room = Room(parent=room, parent_door=door, path=[..parent_path, door])
+        door_room.label = room.door_labels[door]
+        door_room.peek_adjacent_rooms()
+        door_room.calculate_backlink(room) # for later path_to_root
+        door_room = door_room.unique_or_merged() # either this is a new or existing room
+        # The door_room we got back is definitely already disambiguated
+        room.door[door] = door_room
+        all_rooms.add(door_room)
+        rooms_to_explore_queue.unshift(door_room)
+    }
+    room.set_done()
+}
+
+def room unique_or_merge(self) {
+    similar_rooms = all_rooms with the same partial fingerprint
+    max_id = 0
+    for each similar_room {
+        keep track of the max_id from the similar_room.disambiguation_id
+        build an explore and modify execution that goes
+          path_to_self, change label (to something different, like my label plus one mod 4), path_to_root, path_to_similar
+        run that and get the final label (of the similar_room)
+        if that label is our MODIFIED label, then we are the same room {
+            return similar_room as the canonical room
+        }
+    }
+
+    if we got here then self is unique from all of the existing rooms
+    set self.disambiguation_id = max_id + 1
+    return our self
+}
+
+
+# We need a path from a room back to the root
+def calculate_backlink(self, parent) {
+  we need to figure out which door goes BACK to the parent
+  to do that we:
+    traverse to the parent
+    change the label (like label + 1 mod 4)
+    traverse to ourself through the parent door
+    calculate the adjacent room labels
+    and which ever one changes, that's the door that leads back to the parent
+  So that is actually one explore call with an edit to the parent label for every one of our doors
+  once we know which of our doors goes to the parent, we can do something like:
+    self.path_to_root = door_to_parent + parent.path_to_root
+}
+
+
