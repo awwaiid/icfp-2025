@@ -806,56 +806,58 @@ class RoomManager:
         path_to_a = room_a.paths[0]
         path_to_b = room_b.paths[0]
         
-        # Simple case: if B is reachable from A by additional steps
-        if len(path_to_b) > len(path_to_a) and path_to_b[:len(path_to_a)] == path_to_a:
-            # B is reachable from A
-            path_a_to_b = path_to_b[len(path_to_a):]
-            
-            print(f"Disambiguating via path: A{path_to_a} -> [edit] -> A{path_to_a}{path_a_to_b}")
-            
-            # Choose a unique label for editing (different from both rooms)
-            edit_label = None
-            for candidate in [2, 3, 1, 0]:  # Try different labels
-                if candidate != room_a.label and candidate != room_b.label:
-                    edit_label = candidate
-                    break
-                    
-            if edit_label is None:
-                print("Cannot find unique edit label")
-                return False
-            
-            # Construct disambiguation plan: path_to_a + [edit] + path_from_a_to_b
-            plan_parts = path_to_a + [f"[{edit_label}]"] + path_a_to_b
-            plan_string = "".join(str(x) for x in plan_parts)
-            
-            print(f"Executing plan: {plan_string}")
-            
-            try:
-                result = api_client.explore([plan_string])
+        # Choose a unique label for editing (different from both rooms)
+        edit_label = None
+        for candidate in [2, 3, 1, 0]:  # Try different labels
+            if candidate != room_a.label and candidate != room_b.label:
+                edit_label = candidate
+                break
                 
-                if result and "results" in result:
-                    response = result["results"][0]
+        if edit_label is None:
+            print("Cannot find unique edit label")
+            return False
+        
+        # Get reverse path from A back to root, if available
+        if hasattr(room_a, 'path_to_root') and room_a.path_to_root:
+            reverse_path_from_a_to_root = room_a.path_to_root
+        else:
+            print("Room A does not have path_to_root - cannot disambiguate")
+            return False
+            
+        print(f"Disambiguating: path_to_a={path_to_a}, path_to_b={path_to_b}, reverse_path={reverse_path_from_a_to_root}")
+        
+        # Construct disambiguation plan: path_to_a + [edit] + reverse_path_from_a_to_root + path_to_b
+        plan_parts = path_to_a + [f"[{edit_label}]"] + reverse_path_from_a_to_root + path_to_b
+        plan_string = "".join(str(x) for x in plan_parts)
+        
+        print(f"Executing plan: {plan_string}")
+        
+        try:
+            result = api_client.explore([plan_string])
+            
+            if result and "results" in result:
+                response = result["results"][0]
+                
+                # Parse response
+                actual_labels, echo_labels = api_client.parse_response_with_echoes(plan_string, response)
+                
+                if actual_labels:
+                    final_label = actual_labels[-1]
+                    print(f"Final label at B: {final_label} (original: {room_b.label}, edit: {edit_label})")
                     
-                    # Parse response
-                    actual_labels, echo_labels = api_client.parse_response_with_echoes(plan_string, response)
-                    
-                    if actual_labels:
-                        final_label = actual_labels[-1]
-                        print(f"Final label at B: {final_label} (original: {room_b.label}, edit: {edit_label})")
+                    if final_label == room_b.label:
+                        print("✅ Rooms are DIFFERENT - B kept original label")
+                        return True
+                    elif final_label == edit_label:
+                        print("❌ Rooms are SAME - B has edited label")
+                        return False
+                    else:
+                        print(f"❓ Unclear result - B has unexpected label {final_label}")
+                        return False
                         
-                        if final_label == room_b.label:
-                            print("✅ Rooms are DIFFERENT - B kept original label")
-                            return True
-                        elif final_label == edit_label:
-                            print("❌ Rooms are SAME - B has edited label")
-                            return False
-                        else:
-                            print(f"❓ Unclear result - B has unexpected label {final_label}")
-                            return False
-                            
-            except Exception as e:
-                print(f"Disambiguation failed: {e}")
-                return False
+        except Exception as e:
+            print(f"Disambiguation failed: {e}")
+            return False
         
         # TODO: Handle more complex path relationships (A->B via different routes)
         print("No simple path from A to B found for disambiguation")

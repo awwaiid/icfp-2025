@@ -154,14 +154,21 @@ class Room:
         print(f"Calculating backlink from {self} to {parent_room} using edit label {edit_label}")
         
         try:
-            # Build exploration plans: parent_path + [edit] + self_path + door for each door
+            # Build exploration plans: parent_path + [edit] + step_from_parent_to_self + door for each door
             parent_path_str = "".join(str(d) for d in parent_path)
-            self_path_str = "".join(str(d) for d in self_path)
+            
+            # Calculate the step from parent to self
+            # If self_path is parent_path + [X], then step from parent to self is just [X]
+            if len(self_path) == len(parent_path) + 1 and self_path[:len(parent_path)] == parent_path:
+                step_to_self = str(self_path[len(parent_path)])
+            else:
+                print(f"ERROR: Cannot calculate step from parent to self. parent_path={parent_path}, self_path={self_path}")
+                return None
             
             explore_plans = []
             for door in range(6):
-                # Plan: go to parent, edit its label, go to self, go through door
-                plan = parent_path_str + f"[{edit_label}]" + self_path_str + str(door)
+                # Plan: go to parent, edit its label, go to self (one step), go through door
+                plan = parent_path_str + f"[{edit_label}]" + step_to_self + str(door)
                 explore_plans.append(plan)
             
             print(f"    Testing doors with plans: {explore_plans}")
@@ -299,6 +306,7 @@ class Room:
             print(f"Room similarity test failed: {e}")
             
         return False
+
 
     def set_done(self):
         """Mark this room as fully explored"""

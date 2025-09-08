@@ -581,8 +581,9 @@ class Problem:
             complete_rooms = [r for r in all_rooms if r.is_complete() and hasattr(r, 'disambiguation_id') and r.disambiguation_id is not None]
             print(f"Progress: {len(complete_rooms)}/{self.room_count} complete rooms")
             
-            if len(complete_rooms) >= self.room_count:
-                print(f"🎉 Target reached! Found {len(complete_rooms)} complete rooms")
+            # Continue until we've explored all discovered rooms AND found enough rooms
+            if len(complete_rooms) >= self.room_count and len(rooms_to_explore_queue) == 0:
+                print(f"🎉 Target reached! Found {len(complete_rooms)} complete rooms and all rooms fully explored")
                 break
         
         print(f"\nSystematic exploration completed after {iteration} iterations")
