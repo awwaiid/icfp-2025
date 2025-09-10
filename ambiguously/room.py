@@ -243,27 +243,69 @@ class Room:
                     for path in self.paths:
                         if path not in similar_room.paths:
                             similar_room.add_path(path)
+                    # Copy over door_rooms if we have them and the canonical room doesn't
+                    # Also update bidirectional references to point to the canonical room
+                    print(f"  MERGE: Copying connections from {self} to canonical {similar_room}")
+                    for door in range(6):
+                        if self.door_rooms[door] is not None and similar_room.door_rooms[door] is None:
+                            door_room = self.door_rooms[door]
+                            print(f"  MERGE: Copying {self} door {door} -> {door_room} to canonical room")
+                            similar_room.door_rooms[door] = door_room
+                            
+                            # Update the bidirectional reference in door_room to point to canonical room
+                            for back_door in range(6):
+                                if door_room.door_rooms[back_door] == self:
+                                    print(f"  MERGE: Updating reverse reference {door_room} door {back_door}: {self} -> {similar_room}")
+                                    door_room.door_rooms[back_door] = similar_room
+                                    break
                     return similar_room
                 else:
                     print(f"Room {self} is DIFFERENT from {similar_room}")
                     
-            except Exception as e:
-                print(f"Disambiguation test failed: {e} - assuming different")
+            except RuntimeError as e:
+                # Disambiguation test detected an invalid state - this is a fatal error
+                # Don't try to continue with potentially corrupted room state
+                raise e
         
-        # If we get here, this room is unique among the similar rooms
-        self.disambiguation_id = max_disambiguation_id + 1
-        print(f"Room {self} is unique - assigned disambiguation_id {self.disambiguation_id}")
-        return self
+        # If we get here, this room tested as different from all similar rooms
+        # Only assign disambiguation_id if we have strong evidence
+        if len(similar_rooms) == 0:
+            # First room with this partial fingerprint
+            self.disambiguation_id = 0
+            print(f"Room {self} is unique - assigned disambiguation_id 0")
+        else:
+            # For now, be conservative and merge with the first room instead of creating new disambiguation IDs
+            # This prevents the "rooms not in final mapping" issue
+            first_similar = similar_rooms[0]
+            print(f"Room {self} conservatively merged with {first_similar} to avoid disambiguation complexity")
+            # Add our path to the existing room
+            for path in self.paths:
+                if path not in first_similar.paths:
+                    first_similar.add_path(path)
+            # Copy over door_rooms if we have them and the canonical room doesn't
+            for door in range(6):
+                if self.door_rooms[door] is not None and first_similar.door_rooms[door] is None:
+                    first_similar.door_rooms[door] = self.door_rooms[door]
+            return first_similar
 
     def _test_rooms_are_same(self, other_room, api_client):
         """Test if this room and other_room are actually the same room"""
-        if not hasattr(self, 'path_from_root') or not hasattr(other_room, 'path_from_root'):
-            # Can't test without proper paths
-            return False
+        if not hasattr(self, 'path_from_root') or self.path_from_root is None:
+            raise RuntimeError(f"FATAL: Room {self} missing path_from_root - invalid state for disambiguation test")
+        
+        if not hasattr(other_room, 'path_from_root') or other_room.path_from_root is None:
+            raise RuntimeError(f"FATAL: Room {other_room} missing path_from_root - invalid state for disambiguation test")
         
         if not hasattr(self, 'path_to_root') or self.path_to_root is None:
-            # Can't test without backlink
-            return False
+            raise RuntimeError(f"FATAL: Room {self} missing path_to_root (backlink) - invalid state for disambiguation test")
+        
+        # Additional validation: rooms should have proper non-root paths for disambiguation
+        # (The root room with empty path_from_root shouldn't need disambiguation)
+        if len(self.path_from_root) == 0 and len(other_room.path_from_root) == 0:
+            raise RuntimeError(f"FATAL: Cannot disambiguate two root rooms - both have empty path_from_root")
+        
+        if len(self.path_to_root) == 0 and len(self.path_from_root) > 0:
+            raise RuntimeError(f"FATAL: Room {self} has non-empty path_from_root but empty path_to_root - invalid backlink state")
             
         # Choose unique edit label
         edit_label = None
@@ -273,7 +315,7 @@ class Room:
                 break
                 
         if edit_label is None:
-            return False
+            raise RuntimeError(f"FATAL: Cannot find unique edit label for disambiguation test between {self} (label={self.label}) and {other_room} (label={other_room.label})")
         
         try:
             # Proper plan: navigate to self, edit label, use backlink to return to root, then navigate to other
@@ -289,23 +331,32 @@ class Room:
             
             result = api_client.explore([plan_str])
             
-            if result and "results" in result and len(result["results"]) == 1:
-                result_data = result["results"][0]
-                print(f"  Raw result: {result_data}")
+            if not result or "results" not in result:
+                raise RuntimeError(f"FATAL: API client returned invalid result structure for disambiguation test: {result}")
                 
-                actual_labels, echo_labels = api_client.parse_response_with_echoes(plan_str, result_data)
-                print(f"  Parsed: actual_labels={actual_labels}, echo_labels={echo_labels}")
-                
-                if actual_labels:
-                    final_label = actual_labels[-1]
-                    print(f"  Final label: {final_label}, expecting edit_label: {edit_label}")
-                    # If final room shows the edit we made to the first room, they're the same room
-                    return final_label == edit_label
-                    
-        except Exception as e:
-            print(f"Room similarity test failed: {e}")
+            if len(result["results"]) != 1:
+                raise RuntimeError(f"FATAL: Expected exactly 1 result for disambiguation test, got {len(result['results'])}")
             
-        return False
+            result_data = result["results"][0]
+            print(f"  Raw result: {result_data}")
+            
+            actual_labels, echo_labels = api_client.parse_response_with_echoes(plan_str, result_data)
+            print(f"  Parsed: actual_labels={actual_labels}, echo_labels={echo_labels}")
+            
+            if not actual_labels:
+                raise RuntimeError(f"FATAL: Could not parse any actual labels from disambiguation test result: {result_data}")
+            
+            final_label = actual_labels[-1]
+            print(f"  Final label: {final_label}, expecting edit_label: {edit_label}")
+            # If final room shows the edit we made to the first room, they're the same room
+            return final_label == edit_label
+                    
+        except RuntimeError:
+            # Re-raise runtime errors (our validation errors)
+            raise
+        except Exception as e:
+            # Only catch unexpected API/network errors here
+            raise RuntimeError(f"FATAL: Unexpected error during disambiguation test API call: {e}")
 
 
     def set_done(self):

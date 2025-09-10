@@ -25,6 +25,8 @@ class Problem:
         # Initialize components
         self.observations = []  # Raw API observations
         self.explored_paths = set()  # Track paths we've already explored
+        # Separate connection storage to avoid merging complexity
+        self.connections = {}  # {(room_fingerprint, door): (connected_room_fingerprint, connected_door)}
 
         self.api_client = ApiClient(user_id)
         self.room_manager = RoomManager(room_count, self.observations)
@@ -36,6 +38,43 @@ class Problem:
     def select_problem(self, problem_name: str):
         """Select a problem using the API"""
         return self.api_client.select_problem(problem_name)
+        
+    def store_connection(self, room1_fp, door1, room2_fp, door2):
+        """Store a bidirectional connection between rooms"""
+        # Check if connection already exists to avoid duplicates
+        existing1 = self.connections.get((room1_fp, door1))
+        existing2 = self.connections.get((room2_fp, door2))
+        
+        if existing1 is not None:
+            if existing1 == (room2_fp, door2):
+                print(f"  SKIP DUPLICATE: {room1_fp} door {door1} <-> {room2_fp} door {door2}")
+                return
+            else:
+                print(f"  ⚠️  OVERWRITE: {room1_fp} door {door1} was {existing1}, now ({room2_fp}, {door2})")
+        
+        if existing2 is not None:
+            if existing2 == (room1_fp, door1):
+                print(f"  SKIP DUPLICATE REVERSE: {room2_fp} door {door2} <-> {room1_fp} door {door1}")
+                return
+            else:
+                print(f"  ⚠️  REVERSE OVERWRITE: {room2_fp} door {door2} was {existing2}, now ({room1_fp}, {door1})")
+        
+        # Handle bidirectional conflicts by using first-wins policy
+        if existing1 is not None or existing2 is not None:
+            print(f"  🔥 BIDIRECTIONAL CONFLICT DETECTED!")
+            print(f"     Trying to connect: {room1_fp} door {door1} <-> {room2_fp} door {door2}")
+            if existing1: print(f"     But {room1_fp} door {door1} already connects to {existing1}")
+            if existing2: print(f"     But {room2_fp} door {door2} already connects to {existing2}")
+            print(f"  ✋ KEEPING FIRST CONNECTION (first-wins policy)")
+            return
+        
+        self.connections[(room1_fp, door1)] = (room2_fp, door2)
+        self.connections[(room2_fp, door2)] = (room1_fp, door1)
+        print(f"  STORED: {room1_fp} door {door1} <-> {room2_fp} door {door2}")
+        
+    def get_connection(self, room_fp, door):
+        """Get the connection for a specific room door"""
+        return self.connections.get((room_fp, door))
 
     def explore(self, plans: List[List[int]]):
         """Explore with given plans and process results"""
@@ -169,7 +208,22 @@ class Problem:
             if room.is_complete():
                 fingerprint = room.get_fingerprint()
                 absolute_id = fingerprint_to_absolute_id.get(fingerprint, "?")
-                absolute_connections = self.room_manager.get_absolute_connections(room)
+                
+                # Use direct door_rooms data if available from systematic exploration
+                if hasattr(room, 'door_rooms') and room.door_rooms and any(r is not None for r in room.door_rooms):
+                    # Build connections from direct door_rooms references
+                    absolute_connections = []
+                    for door_room in room.door_rooms:
+                        if door_room is not None:
+                            door_fp = door_room.get_fingerprint()
+                            door_abs_id = fingerprint_to_absolute_id.get(door_fp, None)
+                            absolute_connections.append(door_abs_id)
+                        else:
+                            absolute_connections.append(None)
+                else:
+                    # Fallback to room_manager method
+                    absolute_connections = self.room_manager.get_absolute_connections(room)
+                    
                 absolute_connections_str = (
                     "["
                     + ", ".join(
@@ -479,7 +533,8 @@ class Problem:
         print("=== Systematic Exploration Algorithm ===")
         
         # First, bootstrap by creating root room
-        all_rooms = []  # Global room registry
+        all_rooms = []  # Registry of done, canonical rooms only
+        discovered_rooms = []  # Registry of all discovered rooms (for disambiguation)
         
         # Get the starting room (should already exist from bootstrap)
         existing_rooms = self.room_manager.get_all_rooms()
@@ -505,90 +560,252 @@ class Problem:
         root_room.disambiguation_id = 0  # Root is official immediately
         root_room.path_to_root = []  # Root has empty path to self
         root_room.path_from_root = []  # Root is reached by empty path from self
+        discovered_rooms.append(root_room)
+        # Register root room with room manager
+        if root_room not in self.room_manager.possible_rooms:
+            self.room_manager.possible_rooms.append(root_room)
+        # Also add root room to all_rooms since it's already canonical
         all_rooms.append(root_room)
         
-        # Initialize exploration queue
-        rooms_to_explore_queue = deque([root_room])
+        # Initialize exploration queue with DOORS instead of rooms
+        doors_to_explore_queue = deque()
+        queued_doors = set()  # Track (fingerprint, door) to avoid duplicates
+        
+        root_fp = root_room.get_fingerprint()
+        for door in range(6):
+            doors_to_explore_queue.append((root_room, door))
+            queued_doors.add((root_fp, door))
         
         iteration = 0
-        while rooms_to_explore_queue and iteration < max_iterations:
+        max_door_iterations = max_iterations * 6  # Allow more iterations since we're processing doors individually  
+        while doors_to_explore_queue and iteration < max_door_iterations:
             iteration += 1
-            current_room = rooms_to_explore_queue.popleft()
+            current_room, door = doors_to_explore_queue.popleft()
             
-            print(f"\n--- Systematic Iteration {iteration}: Exploring {current_room} ---")
+            print(f"\n--- Systematic Iteration {iteration}: Exploring {current_room} door {door} ---")
             
-            # Skip if room is already done
-            if current_room.is_done:
-                print("Room already done - skipping")
+            # Check if this door already has a connection stored
+            current_fp = current_room.get_fingerprint()
+            if (current_fp, door) in self.connections:
+                print(f"Door {door} already has connection - skipping")
                 continue
             
-            # Process each door (0-5)
-            for door in range(6):
-                door_label = current_room.door_labels[door]
-                print(f"Processing door {door} -> label {door_label}")
+            door_label = current_room.door_labels[door]
+            print(f"Processing door {door} -> label {door_label}")
+            
+            # Create path to child room
+            if current_room.paths:
+                child_path = current_room.paths[0] + [door]
+            else:
+                child_path = [door]
+            
+            # Create child room
+            child_room = Room(label=door_label, parent=current_room, parent_door=door)
+            child_room.add_path(child_path)
+            
+            # Set path_from_root: parent's path_from_root + door
+            child_room.path_from_root = current_room.path_from_root + [door]
+            
+            # Get complete partial fingerprint for child
+            print(f"  Getting partial fingerprint for child room...")
+            adjacent_labels = child_room.peek_adjacent_rooms(self.api_client)
+            
+            if adjacent_labels and len(adjacent_labels) == 6:
+                child_room.door_labels = adjacent_labels[:]
+                print(f"  Child partial fingerprint: {child_room.get_fingerprint(include_disambiguation=False)}")
                 
-                # Create path to child room
-                if current_room.paths:
-                    child_path = current_room.paths[0] + [door]
+                # Calculate backlink to parent
+                print(f"  Calculating backlink to parent...")
+                backlink_door = child_room.calculate_backlink(current_room, self.api_client)
+                if backlink_door is not None:
+                    print(f"  Backlink calculated: door {backlink_door} leads to parent")
+                
+                # Disambiguate and get canonical room using all discovered rooms
+                canonical_room = child_room.unique_or_merged(discovered_rooms, self.api_client)
+                
+                # Store connection in separate registry (cleaner than door_rooms)  
+                if backlink_door is not None:
+                    # Store bidirectional connection
+                    self.store_connection(
+                        current_room.get_fingerprint(), door,
+                        canonical_room.get_fingerprint(), backlink_door
+                    )
                 else:
-                    child_path = [door]
+                    print(f"  CONN: ⚠️  No backlink found for {current_room} door {door} -> {canonical_room}")
+                    # Still store a unidirectional connection to avoid missing doors
+                    # We'll find the reverse door when exploring the destination room
+                    if (current_room.get_fingerprint(), door) not in self.connections:
+                        self.connections[(current_room.get_fingerprint(), door)] = (canonical_room.get_fingerprint(), None)
+                        print(f"  STORED UNIDIRECTIONAL: {current_room.get_fingerprint()} door {door} -> {canonical_room.get_fingerprint()} door ?")
                 
-                # Create child room
-                child_room = Room(label=door_label, parent=current_room, parent_door=door)
-                child_room.add_path(child_path)
+                # Still set door_rooms for backward compatibility during exploration
+                current_room.door_rooms[door] = canonical_room
+                if backlink_door is not None:
+                    canonical_room.door_rooms[backlink_door] = current_room
                 
-                # Set path_from_root: parent's path_from_root + door
-                child_room.path_from_root = current_room.path_from_root + [door]
+                # Add to discovered_rooms if it's a new room (for future disambiguation)
+                if canonical_room not in discovered_rooms:
+                    discovered_rooms.append(canonical_room)
+                    # Also register with room manager so solution generator can access it
+                    if canonical_room not in self.room_manager.possible_rooms:
+                        self.room_manager.possible_rooms.append(canonical_room)
                 
-                # Get complete partial fingerprint for child
-                print(f"  Getting partial fingerprint for child room...")
-                adjacent_labels = child_room.peek_adjacent_rooms(self.api_client)
+                # Add canonical room to all_rooms registry (the list that gets returned to room_manager at end)
+                if canonical_room not in all_rooms:
+                    all_rooms.append(canonical_room)
+                    print(f"  ADDED to all_rooms: {canonical_room.get_fingerprint()}")
                 
-                if adjacent_labels and len(adjacent_labels) == 6:
-                    child_room.door_labels = adjacent_labels[:]
-                    print(f"  Child partial fingerprint: {child_room.get_fingerprint(include_disambiguation=False)}")
+                # Queue individual doors of canonical room for exploration
+                canonical_fp = canonical_room.get_fingerprint()
+                doors_queued = 0
+                for child_door in range(6):
+                    door_key = (canonical_fp, child_door)
+                    if door_key not in self.connections and door_key not in queued_doors:
+                        doors_to_explore_queue.append((canonical_room, child_door))
+                        queued_doors.add(door_key)
+                        doors_queued += 1
+                        
+                if doors_queued > 0:
+                    print(f"  Queued {doors_queued} new doors of child room for exploration")
                     
-                    # Calculate backlink to parent
-                    print(f"  Calculating backlink to parent...")
-                    backlink_door = child_room.calculate_backlink(current_room, self.api_client)
-                    if backlink_door is not None:
-                        print(f"  Backlink calculated: door {backlink_door} leads to parent")
-                    
-                    # Disambiguate and get canonical room
-                    canonical_room = child_room.unique_or_merged(all_rooms, self.api_client)
-                    
-                    # Set door reference in parent
-                    current_room.door_rooms[door] = canonical_room
-                    
-                    # Add to global registry if it's a new room
-                    if canonical_room not in all_rooms:
-                        all_rooms.append(canonical_room)
-                        print(f"  Added new room to registry: {canonical_room.get_fingerprint()}")
-                    
-                    # Queue for exploration if not done
-                    if not canonical_room.is_done:
-                        rooms_to_explore_queue.append(canonical_room)
-                        print(f"  Queued child room for exploration")
-                    
-                else:
-                    print(f"  Failed to get complete partial fingerprint for child")
+            else:
+                print(f"  Failed to get complete partial fingerprint for child")
             
-            # Mark current room as done
-            current_room.set_done()
-            print(f"Marked {current_room} as done")
+            # Progress update and early termination check
+            if iteration % 10 == 0:  # Log progress every 10 doors
+                bidirectional_count = len(self.connections) // 2
+                print(f"Progress: {iteration} doors processed, {bidirectional_count} bidirectional connections stored")
+                
+                # Early termination: if we have stored connections for all expected doors
+                expected_doors = self.room_count * 6
+                if len(self.connections) >= expected_doors:
+                    print(f"🎉 Early termination: All {expected_doors} doors have connections!")
+                    break
             
-            # Check progress
-            complete_rooms = [r for r in all_rooms if r.is_complete() and hasattr(r, 'disambiguation_id') and r.disambiguation_id is not None]
-            print(f"Progress: {len(complete_rooms)}/{self.room_count} complete rooms")
-            
-            # Continue until we've explored all discovered rooms AND found enough rooms
-            if len(complete_rooms) >= self.room_count and len(rooms_to_explore_queue) == 0:
-                print(f"🎉 Target reached! Found {len(complete_rooms)} complete rooms and all rooms fully explored")
+            # Continue until all doors are processed
+            if len(doors_to_explore_queue) == 0:
+                print(f"🎉 Door-based exploration complete! Processed {iteration} doors, stored {len(self.connections)//2} bidirectional connections")
                 break
         
-        print(f"\nSystematic exploration completed after {iteration} iterations")
-        print(f"Total rooms in registry: {len(all_rooms)}")
-        print(f"Rooms remaining in queue: {len(rooms_to_explore_queue)}")
+        print(f"\nDoor-based systematic exploration completed after {iteration} iterations")
+        print(f"Total connections stored: {len(self.connections)}")
+        print(f"Doors remaining in queue: {len(doors_to_explore_queue)}")
+        
+        # POST-PROCESSING: Ensure ALL doors are connected
+        print(f"\n=== POST-PROCESSING: Connecting remaining doors ===")
+        total_doors_expected = len(all_rooms) * 6
+        connected_doors = set(self.connections.keys())
+        print(f"Connected doors: {len(connected_doors)}/{total_doors_expected}")
+        
+        # Find all unconnected doors
+        unconnected_doors = []
+        for room in all_rooms:
+            room_fp = room.get_fingerprint()
+            for door in range(6):
+                door_key = (room_fp, door)
+                if door_key not in connected_doors:
+                    unconnected_doors.append((room, door))
+        
+        print(f"Unconnected doors found: {len(unconnected_doors)}")
+        
+        # For each unconnected door, try to connect it to something
+        for room, door in unconnected_doors:
+            print(f"  Connecting {room.get_fingerprint()} door {door}...")
+            
+            # Get what this door should connect to by exploring it
+            if room.paths:
+                base_path = room.paths[0]  # Use first path to reach this room
+                explore_plan = "".join(str(d) for d in base_path) + str(door)
+                
+                try:
+                    result = self.api_client.explore([explore_plan])
+                    if result and "results" in result and len(result["results"]) == 1:
+                        result_data = result["results"][0]
+                        if len(result_data) >= len(base_path) + 2:
+                            # The target room label is at position len(base_path) + 1
+                            target_label = result_data[len(base_path) + 1]
+                            target_path = base_path + [door]
+                            
+                            # Find room with this target label and path
+                            target_room = None
+                            for candidate in all_rooms:
+                                if candidate.label == target_label and target_path in candidate.paths:
+                                    target_room = candidate
+                                    break
+                            
+                            if target_room:
+                                # Calculate return door by comparing paths
+                                if len(target_path) > 0 and len(base_path) >= 0:
+                                    # Find an available return door on the target room
+                                    return_door = None
+                                    target_fp = target_room.get_fingerprint()
+                                    
+                                    # Try to find the actual return door that leads back to source room
+                                    for test_door in range(6):
+                                        test_key = (target_fp, test_door)
+                                        if test_key not in connected_doors:
+                                            # Test if this door leads back to the source room
+                                            if hasattr(target_room, 'door_labels') and target_room.door_labels:
+                                                if (test_door < len(target_room.door_labels) and 
+                                                    target_room.door_labels[test_door] == room.label):
+                                                    return_door = test_door
+                                                    break
+                                    
+                                    # If no specific return door found, use the first available door
+                                    if return_door is None:
+                                        for test_door in range(6):
+                                            test_key = (target_fp, test_door)
+                                            if test_key not in connected_doors:
+                                                return_door = test_door
+                                                break
+                                    
+                                    if return_door is not None:
+                                        # Store bidirectional connection
+                                        room_fp = room.get_fingerprint()
+                                        return_key = (target_fp, return_door)
+                                        
+                                        self.connections[(room_fp, door)] = (target_fp, return_door)
+                                        self.connections[return_key] = (room_fp, door)
+                                        connected_doors.add((room_fp, door))
+                                        connected_doors.add(return_key)
+                                        print(f"    CONNECTED: {room_fp} door {door} <-> {target_fp} door {return_door}")
+                                    else:
+                                        print(f"    SKIP: No available return doors on {target_fp}")
+                                else:
+                                    print(f"    SKIP: Invalid path calculation")
+                            else:
+                                print(f"    SKIP: Could not find target room for label {target_label} at path {target_path}")
+                        else:
+                            print(f"    SKIP: Insufficient exploration result data")
+                    else:
+                        print(f"    SKIP: Failed to explore door {door}")
+                except Exception as e:
+                    print(f"    ERROR: Exception while exploring door {door}: {e}")
+        
+        final_connected = len(self.connections)
+        print(f"Final connections stored: {final_connected} (bidirectional pairs: {final_connected//2})")
+        
+        # Debug: Show final connections for all rooms
+        print(f"\n=== FINAL ROOM CONNECTIONS DEBUG ===")
+        for i, room in enumerate(all_rooms):
+            print(f"Room {i}: {room.get_fingerprint()}")
+            for door in range(6):
+                connected_room = room.door_rooms[door]
+                if connected_room:
+                    print(f"  Door {door} -> {connected_room.get_fingerprint()}")
+                else:
+                    print(f"  Door {door} -> None")
+        print(f"=== END CONNECTIONS DEBUG ===\n")
+        
+        # Debug: Show what's in all_rooms before updating room_manager
+        print(f"=== ROOM MANAGER UPDATE DEBUG ===")
+        print(f"all_rooms count: {len(all_rooms)}")
+        for i, room in enumerate(all_rooms):
+            print(f"  all_room {i}: {room.get_fingerprint()}")
+        print(f"discovered_rooms count: {len(discovered_rooms)}")
+        for i, room in enumerate(discovered_rooms):
+            print(f"  discovered {i}: {room.get_fingerprint()}")
+        print(f"=== END ROOM MANAGER UPDATE DEBUG ===\n")
         
         # Update the room manager with our systematic rooms
         self.room_manager.possible_rooms = all_rooms
@@ -752,7 +969,7 @@ class Problem:
 
     def generate_solution(self, filename: str = "solution.json"):
         """Generate the solution in the JSON format expected by bin/guess"""
-        return self.solution_generator.generate_solution(filename)
+        return self.solution_generator.generate_solution(filename, self)
 
     # Convenience methods that delegate to components
     def print_analysis(self):

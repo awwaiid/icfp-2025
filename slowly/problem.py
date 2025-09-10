@@ -299,6 +299,14 @@ class Problem:
                 + len(partial_explorations)
             )
 
+            # Check if we have enough unique complete rooms
+            stats = self.room_manager.get_stats()
+            unique_complete_rooms = stats["unique_rooms"]
+            
+            if unique_complete_rooms >= self.room_count:
+                print(f"🎉 Found {unique_complete_rooms}/{self.room_count} unique complete rooms - exploration complete!")
+                break
+                
             if total_work == 0:
                 print("🎉 All rooms complete and all connections verified!")
                 break

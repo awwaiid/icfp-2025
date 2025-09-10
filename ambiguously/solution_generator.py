@@ -12,7 +12,7 @@ class SolutionGenerator:
     def __init__(self, room_manager):
         self.room_manager = room_manager
 
-    def generate_solution(self, filename: str = "solution.json") -> Dict[str, Any]:
+    def generate_solution(self, filename: str = "solution.json", problem=None) -> Dict[str, Any]:
         """Generate the solution in the JSON format expected by bin/guess"""
         print("=== SOLUTION FOR bin/guess ===")
 
@@ -44,6 +44,11 @@ class SolutionGenerator:
             print(
                 f"Index {index}: Label {room.label} (fingerprint {room.get_fingerprint()})"
             )
+        
+        print(f"\n=== ANALYZING ALL STORED CONNECTIONS ===")
+        print(f"Total stored connections: {len(problem.connections)}")
+        for (room_fp, door), (target_fp, target_door) in sorted(problem.connections.items()):
+            print(f"STORED: {room_fp} door {door} -> {target_fp} door {target_door}")
 
         # Generate the solution JSON (only the map part - bin/guess adds the id)
         solution = {
@@ -52,54 +57,106 @@ class SolutionGenerator:
             "connections": [],
         }
 
-        # Generate connections using direct door_rooms data from systematic exploration
+        # Generate connections using the clean stored connections from problem
+        if problem is None or not hasattr(problem, 'connections'):
+            raise RuntimeError("FATAL: Problem instance with stored connections required")
+        
+        # Track processed connections to ensure each bidirectional pair is only added once
+        processed_connections = set()
+        added_connections = set()  # Track actual connections added to avoid duplicates
+        
         for from_abs_id in sorted(absolute_id_to_room.keys()):
             from_room = absolute_id_to_room[from_abs_id]
             from_index = absolute_id_to_index[from_abs_id]
+            from_fp = from_room.get_fingerprint()
 
-            # Use the direct door_rooms connections recorded during exploration
+            # Use the clean stored connections from problem.connections
             for from_door in range(6):
-                to_room = from_room.door_rooms[from_door]
-                
-                if to_room is None:
-                    raise RuntimeError(f"FATAL: Room {from_abs_id} door {from_door} has no connection recorded. This indicates incomplete systematic exploration.")
+                # Skip if we've already processed this connection
+                connection_key = (from_fp, from_door)
+                if connection_key in processed_connections:
+                    continue
+                    
+                # Get connection from stored data
+                connection = problem.get_connection(from_fp, from_door)
+                if connection is None:
+                    print(f"  No connection stored for {from_fp} door {from_door}")
+                    continue
+                    
+                to_fp, to_door = connection
+                print(f"  CLEAN: {from_fp} door {from_door} -> {to_fp} door {to_door}")
                 
                 # Find the absolute ID and index of destination room
-                to_fp = to_room.get_fingerprint()
                 if to_fp not in fingerprint_to_absolute_id:
-                    raise RuntimeError(f"FATAL: Destination room {to_fp} not found in absolute ID mapping.")
+                    print(f"SKIP: Connection destination room {to_fp} not found in final room mapping")
+                    continue
                 
                 to_abs_id = fingerprint_to_absolute_id[to_fp]
                 to_index = absolute_id_to_index[to_abs_id]
+                print(f"  SOLUTION: {from_fp} door {from_door} -> {to_fp} (abs_id {to_abs_id} = index {to_index}) door {to_door}")
+                print(f"  MAPPING: room {from_index} door {from_door} -> room {to_index} door {to_door}")
                 
-                # Find the return door using the backlink information
-                if hasattr(to_room, 'path_to_root') and to_room.path_to_root:
-                    # Use the calculated backlink
-                    to_door = to_room.path_to_root[0]  # First step in path to root
-                else:
-                    # Fallback: search through to_room's door_rooms to find the return connection
-                    to_door = None
-                    for potential_to_door in range(6):
-                        if to_room.door_rooms[potential_to_door] == from_room:
-                            to_door = potential_to_door
-                            break
-                    
-                    if to_door is None:
-                        raise RuntimeError(f"FATAL: Could not find bidirectional connection from Room {to_abs_id} back to Room {from_abs_id}.")
+                # We already have the clean return door from stored connections - no complex calculation needed!
 
-                # Add the connection
-                solution["connections"].append(
-                    {
-                        "from": {
-                            "room": from_index,
-                            "door": from_door,
-                        },
-                        "to": {
-                            "room": to_index,
-                            "door": to_door,
-                        },
-                    }
-                )
+                # Check for duplicates before adding
+                conn1 = (from_index, from_door, to_index, to_door)
+                conn2 = (to_index, to_door, from_index, from_door)
+                
+                if conn1 not in added_connections and conn2 not in added_connections:
+                    # Handle self-loops: only add one direction for self-connections
+                    if from_index == to_index and from_door == to_door:
+                        print(f"  SELF-LOOP: room {from_index} door {from_door} -> room {to_index} door {to_door}")
+                        # Only add one connection for self-loops
+                        solution["connections"].append(
+                            {
+                                "from": {
+                                    "room": from_index,
+                                    "door": from_door,
+                                },
+                                "to": {
+                                    "room": to_index,
+                                    "door": to_door,
+                                },
+                            }
+                        )
+                        added_connections.add(conn1)
+                    else:
+                        # Add BOTH directions for normal connections
+                        solution["connections"].append(
+                            {
+                                "from": {
+                                    "room": from_index,
+                                    "door": from_door,
+                                },
+                                "to": {
+                                    "room": to_index,
+                                    "door": to_door,
+                                },
+                            }
+                        )
+                        
+                        solution["connections"].append(
+                            {
+                                "from": {
+                                    "room": to_index,
+                                    "door": to_door,
+                                },
+                                "to": {
+                                    "room": from_index,
+                                    "door": from_door,
+                                },
+                            }
+                        )
+                        
+                        # Mark both directions as added
+                        added_connections.add(conn1)
+                        added_connections.add(conn2)
+                else:
+                    print(f"  SKIP DUPLICATE: {from_index}:{from_door} <-> {to_index}:{to_door}")
+                
+                # Mark both directions as processed to avoid duplicates
+                processed_connections.add((from_fp, from_door))
+                processed_connections.add((to_fp, to_door))
 
         # Find the actual starting room (the one with empty path) and convert to index
         # Look for the room that has the empty path and disambiguation ID 0 (original room)

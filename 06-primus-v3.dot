@@ -1,0 +1,41 @@
+digraph RoomConnections {
+    rankdir=LR;
+    
+    // Each room has exactly 6 doors (0-5) shown as record shape
+    room0 [label="Room 0|<d0>0|<d1>1|<d2>2|<d3>3|<d4>4|<d5>5" shape=record style=filled fillcolor=lightblue];
+    room1 [label="Room 1|<d0>0|<d1>1|<d2>2|<d3>3|<d4>4|<d5>5" shape=record style=filled fillcolor=lightgreen];
+    room2 [label="Room 2|<d0>0|<d1>1|<d2>2|<d3>3|<d4>4|<d5>5" shape=record style=filled fillcolor=lightcyan];
+    room3 [label="Room 3|<d0>0|<d1>1|<d2>2|<d3>3|<d4>4|<d5>5" shape=record style=filled fillcolor=lightyellow];
+    room4 [label="Room 4|<d0>0|<d1>1|<d2>2|<d3>3|<d4>4|<d5>5" shape=record style=filled fillcolor=lightpink];
+    room5 [label="Room 5|<d0>0|<d1>1|<d2>2|<d3>3|<d4>4|<d5>5" shape=record style=filled fillcolor=lightgray];
+    
+    // Starting room indicator
+    start [label="START" shape=diamond style=filled fillcolor=red];
+    start -> room0;
+    
+    // Door-to-door connections from 06-primus-v2.json
+    room0:d0 -> room3:d2;
+    room0:d1 -> room5:d3;
+    room0:d2 -> room4:d2;
+    room0:d3 -> room3:d2;
+    room0:d4 -> room2:d0;
+    room0:d5 -> room5:d3;
+    room1:d0 -> room5:d0;
+    room1:d1 -> room2:d4;
+    room1:d2 -> room4:d1;
+    room1:d3 -> room3:d1;
+    room1:d4 -> room4:d1;
+    room1:d5 -> room5:d0;
+    room2:d1 -> room4:d0;
+    room2:d2 -> room5:d4;
+    room2:d3 -> room2:d3;  // self-loop
+    room2:d5 -> room3:d0;
+    room3:d3 -> room4:d3;
+    room3:d4 -> room4:d3;
+    room3:d5 -> room0:d0;
+    room4:d4 -> room3:d4;
+    room4:d5 -> room1:d2;
+    room5:d1 -> room5:d1;  // self-loop
+    room5:d2 -> room1:d0;
+    room5:d5 -> room0:d1;
+}
